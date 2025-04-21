@@ -1,0 +1,374 @@
+%python
+import logging
+import sys
+
+from pg_composite_pipelines_configuration.configuration import Configuration
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql.functions import col
+from pyspark.sql.types import DataType, StructType
+#from pg_tw_fa_artemis.common import get_dbutils, get_spark
+
+
+def insertDsSubsectorCostTask(spark, logger, schema_name, target_db_name, target_table):
+    query = f"""
+    DROP TABLE IF EXISTS ds_subsectorcosts_max;
+
+    CREATE TEMPORARY VIEW ds_subsectorcosts_max AS
+    SELECT
+             subsector,
+             voucher_id,
+             MAX(mx.origin_zone) AS origin_zone,
+             MAX(mx.destination_zone) AS destination_zone,
+             MAX(mx.customer_description) AS customer_description,
+             MAX(mx.carrier_description) AS carrier_description,
+             MAX(mx.actual_gi_date) AS actual_gi_date,
+             MAX(mx.goods_receipt_posting_date) AS goods_receipt_posting_date,
+             MAX(mx.created_date) AS created_date,
+             MAX(mx.ship_to_id) AS ship_to_id,
+             MAX(mx.freight_auction) AS freight_auction,
+             MAX(mx.historical_data_structure_flag) AS historical_data_structure_flag,
+             MAX(mx.destination_postal) AS destination_postal,
+             MAX(mx.service_tms_code) AS service_tms_code,
+             MAX(mx.customer_l8) AS customer_l8,
+             MAX(mx.ship_to_description) AS ship_to_description,
+             MAX(mx.distance_per_load) AS distance_per_load,
+             MAX(mx.origin_sf) AS origin_sf,
+             MAX(mx.destination_sf) AS destination_sf,
+             MAX(mx.truckload_vs_intermodal_val) AS truckload_vs_intermodal_val
+    FROM (
+        SELECT
+            `load id` AS load_id,
+            CASE
+                WHEN `origin zone` = "SF_EDWARDSVILLE" THEN "SF_ST_LOUIS"
+                ELSE `origin zone`
+            END AS origin_zone,
+            CASE
+                WHEN `destination zone` = "SF_EDWARDSVILLE" THEN "SF_ST_LOUIS"
+                ELSE `destination zone`
+            END AS destination_zone,
+            `customer description` AS customer_description,
+            `carrier description` AS carrier_description,
+            MAX(`actual gi date`) AS actual_gi_date,
+            `country to` AS country_to,
+            `subsector description` AS subsector,
+            `country to description` AS country_to_description,
+            `goods receipt posting date` AS goods_receipt_posting_date,
+            MAX(`created date`) AS created_date,
+            MAX(`ship to #`) AS ship_to_id,
+            MAX(`ship to description`) AS ship_to_description,
+            `freight auction` AS freight_auction,
+            `historical data structure flag` AS historical_data_structure_flag,
+            `destination postal` AS destination_postal,
+            `customer l8` AS customer_l8,
+            truckload_vs_intermodal_val,
+            `distance per load` AS distance_per_load,
+            `service tms code` AS service_tms_code,
+            `voucher id` AS voucher_id,
+            MIN(`origin sf`) AS origin_sf,
+            MIN(`destination sf`) AS destination_sf
+        FROM cdl_ps_prod.silver_transfix_tv_na.tfs
+        GROUP BY
+            `load id`,
+            `origin zone`,
+            `destination zone`,
+            `customer description`,
+            `carrier description`,
+            `country to`,
+            `subsector description`,
+            `country to description`,
+            `goods receipt posting date`,
+            `freight auction`,
+            `historical data structure flag`,
+            `destination postal`,
+            `customer l8`,
+            truckload_vs_intermodal_val,
+            `distance per load`,
+            `freight type`,
+            `service tms code`,
+            `voucher id`
+    ) mx
+    GROUP BY
+        subsector,
+        voucher_id;
+
+    DROP TABLE IF EXISTS ds_subsectorcosts_noloadid_v13;
+
+    CREATE TEMPORARY VIEW ds_subsectorcosts_noloadid_v13 AS
+    SELECT
+        load_id,
+        voucher_id,
+        service_tms_code,
+        freight_type,
+        country_to,
+        dltl,
+        dst,
+        fuel,
+        exm,
+        lh_rules,
+        weighted_average_rate_adjusted_long,
+        accrual_cost_adjusted,
+        accessorial_costs,
+        weighted_average_rate_adjusted,
+        distance_per_load_dec,
+        unsourced_costs,
+        line_haul_final,
+        total_cost,
+        origin_zone,
+        customer_description,
+        carrier_description,
+        actual_gi_date,
+        goods_receipt_posting_date,
+        created_date,
+        ship_to_id,
+        freight_auction,
+        historical_data_structure_flag,
+        destination_postal,
+        origin_sf,
+        destination_sf,
+        truckload_vs_intermodal_val,
+        subsector_update AS subsector,
+        fy,
+        su_per_load,
+        scs,
+        ftp,
+        tsc,
+        flat,
+        fa_a,
+        steps_ratio_dec,
+        cnc_costs,
+        freight_auction_costs,
+        country_to_description,
+        customer_l8,
+        distance_per_load,
+        ship_to_description,
+        destination_zone_new
+    FROM (
+        SELECT
+            null_final.load_id AS load_id,
+            null_final.voucher_id AS voucher_id,
+            null_final.subsector AS subsector,
+            null_final.service_tms_code AS service_tms_code,
+            null_final.freight_type AS freight_type,
+            null_final.country_to AS country_to,
+            null_final.dltl AS dltl,
+            null_final.dst AS dst,
+            null_final.fuel AS fuel,
+            null_final.exm AS exm,
+            null_final.lh_rules AS lh_rules,
+            null_final.weighted_average_rate_adjusted_long AS weighted_average_rate_adjusted_long,
+            null_final.accrual_cost_adjusted AS accrual_cost_adjusted,
+            null_final.accessorial_costs AS accessorial_costs,
+            null_final.weighted_average_rate_adjusted AS weighted_average_rate_adjusted,
+            null_final.distance_per_load_dec AS distance_per_load_dec,
+            null_final.unsourced_costs AS unsourced_costs,
+            null_final.line_haul_final AS line_haul_final,
+            null_final.total_cost AS total_cost,
+            tfs_max.origin_zone AS origin_zone,
+            tfs_max.destination_zone AS destination_zone,
+            tfs_max.customer_description AS customer_description,
+            tfs_max.carrier_description AS carrier_description,
+            tfs_max.actual_gi_date AS actual_gi_date,
+            tfs_max.goods_receipt_posting_date AS goods_receipt_posting_date,
+            tfs_max.created_date AS created_date,
+            tfs_max.ship_to_id AS ship_to_id,
+            tfs_max.freight_auction AS freight_auction,
+            tfs_max.historical_data_structure_flag AS historical_data_structure_flag,
+            tfs_max.destination_postal AS destination_postal,
+            tfs_max.origin_sf AS origin_sf,
+            tfs_max.destination_sf AS destination_sf,
+            tfs_max.truckload_vs_intermodal_val AS truckload_vs_intermodal_val,
+            regexp_replace(regexp_replace(null_final.subsector, ' SUB-SECTOR', ''), ' SUBSECTOR', '') AS subsector_update,
+            CASE
+                WHEN MONTH(TO_DATE(actual_gi_date)) < 7 THEN CONCAT('FY', SUBSTR(CAST(YEAR(TO_DATE(actual_gi_date)) - 1 AS STRING), -2, 2), SUBSTR(CAST(YEAR(TO_DATE(actual_gi_date)) AS STRING), -2, 2))
+                ELSE CONCAT('FY', SUBSTR(CAST(YEAR(TO_DATE(actual_gi_date)) AS STRING), -2, 2), SUBSTR(CAST(YEAR(TO_DATE(actual_gi_date)) + 1 AS STRING), -2, 2))
+            END AS FY,
+            0 AS su_per_load,
+            0 AS scs,
+            0 AS ftp,
+            0 AS tsc,
+            0 AS flat,
+            0 AS fa_a,
+            0 AS steps_ratio_dec,
+            0 AS cnc_costs,
+            0 AS freight_auction_costs,
+            "" AS country_to_description,
+            "" AS customer_l8,
+            table_370155390_2.historical_data_structure_flag AS historical_data_structure_flag,
+            table_370155390_2.ship_to_id AS ship_to_id,
+            CASE
+                WHEN TO_DATE(table_370155390_2.actual_gi_date) >= '2017-07-01' THEN table_370155390_2.destination_zone
+                WHEN table_370155390_2.destination_zone IS NULL AND table_370155390_1.destination_zone_update IS NOT NULL THEN table_370155390_1.destination_zone_update
+                WHEN table_370155390_2.destination_zone IS NULL AND table_370155390_1.destination_zone_update IS NULL THEN table_370155390_2.destination_postal
+                ELSE table_370155390_2.destination_zone
+            END AS destination_zone_new
+        FROM
+            ds_subc_v14_dest_upd AS table_370155390_1
+            RIGHT JOIN (
+                SELECT DISTINCT
+                    `load id` AS load_id,
+                    `subsector` AS subsector,
+                    `su per load` AS su_per_load,
+                    `service tms code` AS service_tms_code,
+                    `country to` AS country_to,
+                    `freight type` AS freight_type,
+                    `dltl` AS dltl,
+                    `scs` AS scs,
+                    `ftp` AS ftp,
+                    `dst` AS dst,
+                    `tsc` AS tsc,
+                    `fuel` AS fuel,
+                    `flat` AS flat,
+                    `exm` AS exm,
+                    `fa_a` AS fa_a,
+                    `lh_rules` AS lh_rules,
+                    `weighted_average_rate_adjusted_long` AS weighted_average_rate_adjusted_long,
+                    `accrual cost adjusted` AS accrual_cost_adjusted,
+                    `accessorial costs` AS accessorial_costs,
+                    `weighted_average_rate_adjusted` AS weighted_average_rate_adjusted,
+                    `distance per load dec` AS distance_per_load_dec,
+                    `steps ratio dec` AS steps_ratio_dec,
+                    `unsourced costs` AS unsourced_costs,
+                    `line haul final` AS line_haul_final,
+                    `cnc costs` AS cnc_costs,
+                    `freight auction costs` AS freight_auction_costs,
+                    `total cost` AS total_cost,
+                    `origin zone` AS origin_zone,
+                    `destination zone` AS destination_zone,
+                    `customer description` AS customer_description,
+                    `carrier description` AS carrier_description,
+                    `actual gi date` AS actual_gi_date,
+                    `country to description` AS country_to_description,
+                    `goods receipt posting date` AS goods_receipt_posting_date,
+                    `created date` AS created_date,
+                    `freight auction` AS freight_auction,
+                    `destination postal` AS destination_postal,
+                    `customer l8` AS customer_l8,
+                    `distance per load` AS distance_per_load,
+                    `ship to description` AS ship_to_description,
+                    `shipping point code` AS shipping_point_code,
+                    `origin sf` AS origin_sf,
+                    `destination sf` AS destination_sf,
+                    `truckload_vs_intermodal_val` AS truckload_vs_intermodal_val,
+                    `historical data structure flag` AS historical_data_structure_flag,
+                    `ship to id` AS ship_to_id
+                FROM
+                    cdl_ps_prod.silver_transfix_tv_na.tfs
+            ) AS table_370155390_2
+            ON COALESCE(table_370155390_1.destination_postal_update, 'XX') = COALESCE(table_370155390_2.destination_postal, 'XX')
+    ) AS table_179224308_2
+    RIGHT JOIN table_179224308_1 ON table_179224308_1.shipping_point_code = table_179224308_2.shipping_point_code;
+
+    DROP TABLE IF EXISTS ds_subsectorcosts_v14_u;
+
+    CREATE TEMPORARY VIEW ds_subsectorcosts_v14_u AS
+    SELECT * FROM ds_subsectorcosts_v14
+    UNION ALL
+    SELECT
+        load_id,
+        su_per_load,
+        service_tms_code,
+        country_to,
+        freight_type,
+        dltl,
+        scs,
+        ftp,
+        dst,
+        tsc,
+        fuel,
+        flat,
+        exm,
+        fa_a,
+        lh_rules,
+        weighted_average_rate_adjusted_long,
+        accrual_cost_adjusted,
+        accessorial_costs,
+        weighted_average_rate_adjusted,
+        distance_per_load_dec,
+        steps_ratio_dec,
+        unsourced_costs,
+        line_haul_final,
+        cnc_costs,
+        freight_auction_costs,
+        total_cost,
+        customer_description,
+        carrier_description,
+        actual_gi_date,
+        country_to_description,
+        goods_receipt_posting_date,
+        created_date,
+        freight_auction,
+        destination_postal,
+        customer_l8,
+        CAST(distance_per_load AS STRING) AS distance_per_load,
+        ship_to_description,
+        origin_sf,
+        destination_sf,
+        truckload_vs_intermodal_val,
+        historical_data_structure_flag,
+        ship_to_id,
+        destination_zone_new,
+        origin_zone,
+        fy,
+        subsector,
+        CAST(voucher_id AS STRING) AS voucher_id
+    FROM ds_subsectorcosts_noloadid_v13;
+
+    SELECT *,
+        CASE
+            WHEN origin_zone = 'origin zone' THEN 'Undefined'
+            ELSE origin_zone
+        END AS origin_zone_v1,
+        CASE
+            WHEN destination_zone_new = '' THEN 'Undefined'
+            WHEN destination_zone_new IS NULL THEN 'Undefined'
+            WHEN destination_zone_new = 'NULL' THEN 'Undefined'
+            ELSE destination_zone_new
+        END AS destination_zone_v1
+    FROM ds_subsectorcosts_v14_u;
+    """
+
+    # Split the SQL text into individual commands (by semicolon)
+    commands = [cmd.strip() for cmd in query.strip().split(";") if cmd.strip()]
+
+    # Execute each command sequentially
+    for i, cmd in enumerate(commands, 1):
+        logger.info(f"Executing command {i}: {cmd.splitlines()[0]}")
+        spark.sql(cmd)
+
+    logger.info(
+        "Data has been successfully loaded into {}.{}".format(target_db_name, target_table)
+    )
+
+    return 0
+
+
+def main():
+    # Initialize Spark session and logging
+    spark = get_spark()
+    dbutils = get_dbutils()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+
+
+    #config = Configuration.load_for_default_environment(__file__, dbutils)
+
+    schema_name = config['schema-name']
+    target_db_name = f"{config['catalog-name']}.{config['schema-name']}"
+    target_table = config['tables']['tfs_subsector_cost_star']
+
+    insertDsSubsectorCostTask(
+        spark=spark,
+        logger=logger,
+        schema_name=schema_name,
+        target_db_name=target_db_name,
+        target_table=target_table
+    )
+
+
+if __name__ == "__main__":
+    main()
