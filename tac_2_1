@@ -1,0 +1,311 @@
+tmp_tbl_tac_technical_names_2_1 = f"""
+CREATE OR REPLACE TEMPORARY VIEW tmp_tbl_tac_technical_names_2_1 AS 
+SELECT 
+  tac_1.load_id, 
+  tac_1.cal_month_code, 
+  tac_1.ship_to_party_id, 
+  tac_1.operational_freight_type_code, 
+  tac_1.ship_cond_val, 
+  tac_1.sold_to_party_id, 
+  tac_1.schedule_date, 
+  tac_1.schedule_datetm, 
+  tac_1.service_tms_code, 
+  tac_1.trans_plan_point_code, 
+  tac_1.gbu_per_ship_site_name, 
+  tac_1.forward_agent_id, 
+  tac_1.tender_event_type_code, 
+  tac_1.tender_reason_code, 
+  tac_1.tender_date, 
+  tac_1.tender_datetm, 
+  tac_1.carr_mode_code, 
+  tac_1.origin_zone_ship_from_code, 
+  tac_1.deprtre_cntry_code, 
+  tac_1.act_goods_issue_date, 
+  tac_1.actual_goods_issue_datetm, 
+  tac_1.day_in_month_qty, 
+  tac_1.scac_id, 
+  tac_1.carr_mode_desc, 
+  tac_1.tariff_id, 
+  tac_1.schedule_code, 
+  tac_1.tender_first_carr_desc, 
+  tac_1.tender_acptn_id, 
+  tac_1.tender_reason_code_desc, 
+  tac_1.cal_week_code, 
+  tac_1.postal_code, 
+  tac_1.freight_auction_ind, 
+  tac_1.ship_to_party_desc, 
+  tac_1.origin_location_code, 
+  tac_1.origin_zone_code, 
+  dst.dest_ship_from_code, 
+  tac_1.dest_zone_code, 
+  vmd2.carr1_name AS carr_desc, 
+  tac_1.tender_event_datetm, 
+  tac_1.sap_orig_ship_date, 
+  tac_1.tender_orig_ship_date, 
+  CASE WHEN DATE_FORMAT(
+    tac_1.tender_orig_ship_date, 'u'
+  ) = 1 THEN 'Monday' WHEN DATE_FORMAT(
+    tac_1.tender_orig_ship_date, 'u'
+  ) = 2 THEN 'Tuesday' WHEN DATE_FORMAT(
+    tac_1.tender_orig_ship_date, 'u'
+  ) = 3 THEN 'Wednesday' WHEN DATE_FORMAT(
+    tac_1.tender_orig_ship_date, 'u'
+  ) = 4 THEN 'Thursday' WHEN DATE_FORMAT(
+    tac_1.tender_orig_ship_date, 'u'
+  ) = 5 THEN 'Friday' WHEN DATE_FORMAT(
+    tac_1.tender_orig_ship_date, 'u'
+  ) = 6 THEN 'Saturday' WHEN DATE_FORMAT(
+    tac_1.tender_orig_ship_date, 'u'
+  ) = 7 THEN 'Sunday' ELSE '' END AS tender_orig_ship_week_day_name, 
+  tac_1.actual_ship_datetm, 
+  tac_1.actual_ship_datetm2, 
+  tac_1.avg_award_weekly_vol_qty, 
+  CASE WHEN tac_1.alloc_type_code = 'Weekly' THEN (
+    CAST(
+      tac_1.avg_award_weekly_vol_qty AS DECIMAL(30, 4)
+    ) / 7
+  ) WHEN tac_1.alloc_type_code = 'Daily' 
+  AND DATE_FORMAT(tac_1.act_goods_issue_date, 'u') = 7
+  THEN tac_1.sun_max_load_qty WHEN tac_1.alloc_type_code = 'Daily' 
+  AND DATE_FORMAT(tac_1.act_goods_issue_date, 'u') = 1
+  THEN tac_1.mon_max_load_qty WHEN tac_1.alloc_type_code = 'Daily' 
+  AND DATE_FORMAT(tac_1.act_goods_issue_date, 'u') = 2
+  THEN tac_1.tue_max_load_qty WHEN tac_1.alloc_type_code = 'Daily' 
+  AND DATE_FORMAT(tac_1.act_goods_issue_date, 'u') = 3
+  THEN tac_1.wed_max_load_qty WHEN tac_1.alloc_type_code = 'Daily' 
+  AND DATE_FORMAT(tac_1.act_goods_issue_date, 'u') = 4
+  THEN tac_1.thu_max_load_qty WHEN tac_1.alloc_type_code = 'Daily' 
+  AND DATE_FORMAT(tac_1.act_goods_issue_date, 'u') = 5
+  THEN tac_1.fri_max_load_qty WHEN tac_1.alloc_type_code = 'Daily' 
+  AND DATE_FORMAT(tac_1.act_goods_issue_date, 'u') = 6
+  THEN tac_1.sat_max_load_qty ELSE NULL END AS daily_award_qty, 
+  CASE WHEN DATE_FORMAT(tac_1.act_goods_issue_date, 'u') = 1 THEN 'Monday' WHEN DATE_FORMAT(tac_1.act_goods_issue_date, 'u') = 2 THEN 'Tuesday' WHEN DATE_FORMAT(tac_1.act_goods_issue_date, 'u') = 3 THEN 'Wednesday' WHEN DATE_FORMAT(tac_1.act_goods_issue_date, 'u') = 4 THEN 'Thursday' WHEN DATE_FORMAT(tac_1.act_goods_issue_date, 'u') = 5 THEN 'Friday' WHEN DATE_FORMAT(tac_1.act_goods_issue_date, 'u') = 6 THEN 'Saturday' WHEN DATE_FORMAT(tac_1.act_goods_issue_date, 'u') = 7 THEN 'Sunday' ELSE '' END AS actual_ship_week_day_name, 
+  tac_1.alloc_type_code, 
+  tac_1.sun_max_load_qty, 
+  tac_1.mon_max_load_qty, 
+  tac_1.tue_max_load_qty, 
+  tac_1.wed_max_load_qty, 
+  tac_1.thu_max_load_qty, 
+  tac_1.fri_max_load_qty, 
+  tac_1.sat_max_load_qty, 
+  tac_1.final_stop_postal_code, 
+  tac_1.country_from_code, 
+  CASE WHEN LENGTH(vfr.cntry_to_code) > 1 THEN vfr.cntry_to_code WHEN LENGTH(final_stop_postal_code) IN (5, 9, 10) THEN 'US' ELSE 'CA' END AS country_to_code, 
+  tac_1.freight_auction_flag, 
+  tac_1.freight_type_code, 
+  tac_1.pre_tms_update_flag, 
+  CASE WHEN historical_data_structure_flag = 0 
+  AND pre_tms_update_flag = 0 THEN 0 WHEN historical_data_structure_flag = 1 
+  AND pre_tms_update_flag = 0 THEN 1 ELSE 2 END AS data_structure_version_num, 
+  tac_1.primary_carr_flag, 
+  CASE WHEN tac_1.freight_auction_ind = 'YES' 
+  AND tac_1.freight_auction_flag = 'N' 
+  AND tac_1.primary_carr_flag = '1' 
+  AND tac_1.forward_agent_id = (
+    CASE WHEN LENGTH(tac_1.actual_carr_id) = 8 THEN CONCAT('00', tac_1.actual_carr_id) ELSE tac_1.actual_carr_id END
+  ) THEN tac_1.load_id WHEN tac_1.freight_auction_flag = 'Y' THEN null ELSE null END AS tbpc_no_freight_auction_adjmt_id, 
+  CASE WHEN tac_1.freight_auction_flag IS NULL THEN NULL WHEN tac_1.freight_auction_flag = '' THEN NULL WHEN tac_1.freight_auction_ind = 'YES' 
+  AND tac_1.freight_auction_flag = 'Y' 
+  AND tac_1.primary_carr_flag = '1' 
+  AND tac_1.forward_agent_id = (
+    CASE WHEN LENGTH(tac_1.actual_carr_id) = 8 THEN CONCAT('00', tac_1.actual_carr_id) ELSE tac_1.actual_carr_id END
+  ) THEN tac_1.load_id ELSE NULL END AS tbpc_freight_auction_adjmt_id, 
+  REGEXP_REPLACE(
+    tac_1.tender_reject_load_id, "^0+", 
+    ''
+  ) AS tender_reject_load_id, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code WHEN pc656.cust_3_name LIKE '%AB ACQUISITION, LLC%' THEN 'ALBERTSON\'S SAFEWAY' WHEN pc656.cust_3_name LIKE '%COSTCO COMPANIES, INC. (WW)%' 
+  AND pc656.cust_5_name LIKE '%COSTCO CORP US%' THEN 'COSTCO' WHEN pc656.cust_3_name LIKE '%COSTCO COMPANIES, INC. (WW)%' 
+  AND pc656.cust_5_name LIKE '%COSTCO WHSL (CA)%' THEN 'COSTCO CANADA' WHEN pc656.cust_3_name LIKE '%BJ%S WHOLESALE (WW)%' THEN 'BJ\'S' WHEN pc656.cust_3_name LIKE '%CVS CORPORATION US%' THEN 'CVS' WHEN pc656.cust_3_name LIKE '%TARGET CORP US%' THEN 'TARGET' WHEN pc656.cust_3_name LIKE '%WAL-MART CORP. (WW)%' 
+  AND pc656.cust_5_name LIKE 'SAM%' THEN 'SAM\'S' WHEN pc656.cust_3_name LIKE '%WAL-MART CORP. (WW)%' 
+  AND pc656.cust_12_name LIKE 'SAM%' THEN 'SAM\'S' WHEN pc656.cust_3_name LIKE '%WAL-MART CORP. (WW)%' 
+  AND pc656.cust_5_name NOT LIKE 'SAM%' THEN 'WALMART' WHEN pc656.cust_3_name LIKE '%Null%' THEN tac_1.ship_to_party_desc
+  WHEN pc656.cust_3_name IS NULL THEN tac_1.ship_to_party_desc
+  WHEN pc656.cust_3_name LIKE '%THE KROGER CO. US%' THEN 'KROGER' WHEN pc656.cust_3_name LIKE '%UNKN LVL 3 UNKNOWN CUSTOMER%' THEN tac_1.ship_to_party_desc
+  ELSE REGEXP_REPLACE(pc656.cust_3_name, '\(WW\)', '') END AS customer_code, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(pc656.cust_1_id, c656.cust1_id) END AS customer_lvl1_code, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(
+    pc656.cust_1_name, c656.cust1_name
+  ) END AS customer_lvl1_desc, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(pc656.cust_2_id, c656.cust2_id) END AS customer_lvl2_code, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(
+    pc656.cust_2_name, c656.cust2_name
+  ) END AS customer_lvl2_desc, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(pc656.cust_3_id, c656.cust3_id) END AS customer_lvl3_code, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(
+    pc656.cust_3_name, c656.cust3_name
+  ) END AS customer_lvl3_desc, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(pc656.cust_4_id, c656.cust4_id) END AS customer_lvl4_code, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(
+    pc656.cust_4_name, c656.cust4_name
+  ) END AS customer_lvl4_desc, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(pc656.cust_5_id, c656.cust5_id) END AS customer_lvl5_code, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(
+    pc656.cust_5_name, c656.cust5_name
+  ) END AS customer_lvl5_desc, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(pc656.cust_6_id, c656.cust6_id) END AS customer_lvl6_code, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(
+    pc656.cust_6_name, c656.cust6_name
+  ) END AS customer_lvl6_desc, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(pc656.cust_7_id, c656.cust7_id) END AS customer_lvl7_code, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(
+    pc656.cust_7_name, c656.cust7_name
+  ) END AS customer_lvl7_desc, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(pc656.cust_8_id, c656.cust8_id) END AS customer_lvl8_code, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(
+    pc656.cust_8_name, c656.cust8_name
+  ) END AS customer_lvl8_desc, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(pc656.cust_9_id, c656.cust9_id) END AS customer_lvl9_code, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(
+    pc656.cust_9_name, c656.cust9_name
+  ) END AS customer_lvl9_desc, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(
+    pc656.cust_10_id, c656.cust10_id
+  ) END AS customer_lvl10_code, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(
+    pc656.cust_10_name, c656.cust10_name
+  ) END AS customer_lvl10_desc, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(
+    pc656.cust_11_id, c656.cust11_id
+  ) END AS customer_lvl11_code, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(
+    pc656.cust_11_name, c656.cust11_name
+  ) END AS customer_lvl11_desc, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(
+    pc656.cust_12_id, c656.cust12_id
+  ) END AS customer_lvl12_code, 
+  CASE WHEN tac_1.freight_type_code = 'INTERPLANT' THEN dst.dest_ship_from_code ELSE COALESCE(
+    pc656.cust_12_name, c656.cust12_name
+  ) END AS customer_lvl12_desc, 
+  REGEXP_REPLACE(tac_1.actual_carr_id, "^0+", '') AS actual_carr_id, 
+  vmd.carr1_name AS actual_carr_desc, 
+  CAST(
+    NVL(
+      tmp_tbl_costs.actual_carr_trans_cost_amt, 
+      0
+    ) AS DECIMAL(38, 16)
+  ) AS actual_carr_trans_cost_amt, 
+  CAST(
+    NVL(tmp_tbl_costs.linehaul, 0) AS DECIMAL(38, 16)
+  ) AS linehaul_cost_amt, 
+  CAST(
+    NVL(
+      tmp_tbl_costs.incrmtl_freight_auction_cost_amt, 
+      0
+    ) AS DECIMAL(38, 16)
+  ) AS incrmtl_freight_auction_cost_amt, 
+  CAST(
+    NVL(
+      tmp_tbl_costs.cnc_carr_mix_cost_amt, 
+      0
+    ) AS DECIMAL(38, 16)
+  ) AS cnc_carr_mix_cost_amt, 
+  CAST(
+    NVL(tmp_tbl_costs.unsourced, 0) AS DECIMAL(38, 16)
+  ) AS unsource_cost_amt, 
+  CAST(
+    NVL(tmp_tbl_costs.fuel, 0) AS DECIMAL(38, 16)
+  ) AS fuel_cost_amt, 
+  CAST(
+    NVL(
+      tmp_tbl_costs.actual_carr_trans_cost_amt, 
+      0
+    ) - NVL(tmp_tbl_costs.linehaul, 0) - NVL(
+      tmp_tbl_costs.incrmtl_freight_auction_cost_amt, 
+      0
+    ) - NVL(
+      tmp_tbl_costs.cnc_carr_mix_cost_amt, 
+      0
+    ) - NVL(tmp_tbl_costs.unsourced, 0) - NVL(tmp_tbl_costs.fuel, 0) AS DECIMAL(38, 16)
+  ) AS accessorial_cost_amt, 
+  CAST(
+    sss.appliance_subsector_step_cnt AS FLOAT
+  ) AS appliance_subsector_step_cnt, 
+  CAST(
+    sss.baby_care_subsector_step_cnt AS FLOAT
+  ) AS baby_care_subsector_step_cnt, 
+  CAST(
+    sss.chemical_subsector_step_cnt AS FLOAT
+  ) AS chemical_subsector_step_cnt, 
+  CAST(
+    sss.fabric_subsector_step_cnt AS FLOAT
+  ) AS fabric_subsector_step_cnt, 
+  CAST(
+    sss.family_subsector_step_cnt AS FLOAT
+  ) AS family_subsector_step_cnt, 
+  CAST(
+    sss.fem_subsector_step_cnt AS FLOAT
+  ) AS fem_subsector_step_cnt, 
+  CAST(
+    sss.hair_subsector_step_cnt AS FLOAT
+  ) AS hair_subsector_step_cnt, 
+  CAST(
+    sss.home_subsector_step_cnt AS FLOAT
+  ) AS home_subsector_step_cnt, 
+  CAST(
+    sss.oral_subsector_step_cnt AS FLOAT
+  ) AS oral_subsector_step_cnt, 
+  CAST(
+    sss.phc_subsector_step_cnt AS FLOAT
+  ) AS phc_subsector_step_cnt, 
+  CAST(
+    sss.shave_subsector_step_cnt AS FLOAT
+  ) AS shave_subsector_step_cnt, 
+  CAST(sss.skin_subsector_cnt AS FLOAT) AS skin_subsector_cnt, 
+  CAST(sss.other_subsector_cnt AS FLOAT) AS other_subsector_cnt, 
+  dst.customer_desc, 
+  CONCAT(
+    tac_1.act_goods_issue_date, 
+    ' ', 
+    SUBSTR(tac_1.actual_ship_datetm, 1, 2), 
+    ':', 
+    SUBSTR(tac_1.actual_ship_datetm, 3, 2), 
+    ':', 
+    SUBSTR(tac_1.actual_ship_datetm, 5, 2)
+  ) AS actual_ship_tmstp, 
+  CONCAT(
+    tac_1.act_goods_issue_date, 
+    ' ', 
+    SUBSTR(tac_1.actual_ship_datetm2, 1, 2), 
+    ':', 
+    SUBSTR(tac_1.actual_ship_datetm2, 3, 2), 
+    ':', 
+    SUBSTR(tac_1.actual_ship_datetm2, 5, 2)
+  ) AS actual_ship_tmstp2, 
+  CASE WHEN tac_1.tender_event_type_code = 'TENDACC' 
+  AND tac_1.freight_auction_flag = 'N' THEN REGEXP_REPLACE(tac_1.load_id, "^0+", '') ELSE '' END AS tender_accept_load_with_no_fa, 
+  CASE WHEN tac_1.tender_event_type_code = 'TENDACC' 
+  AND tac_1.freight_auction_flag = 'Y' THEN REGEXP_REPLACE(tac_1.load_id, "^0+", '') ELSE '' END AS tender_accept_load_with_fa, 
+  tac_1.tfts_load_tmstp AS tfts_load_tmstp, 
+  tac_1.load_from_file_name, 
+  tac_1.bd_mod_tmstp, 
+  tac_1.historical_data_structure_flag, 
+  ROW_NUMBER() OVER (
+    PARTITION BY tac_1.load_id, 
+    tac_1.ship_to_party_id, 
+    tac_1.forward_agent_id, 
+    tac_1.tender_event_type_code, 
+    tac_1.tender_reason_code, 
+    tac_1.tender_date, 
+    tac_1.tender_datetm, 
+    tac_1.carr_mode_code, 
+    tac_1.origin_zone_ship_from_code, 
+    tac_1.service_tms_code 
+    ORDER BY 
+      tac_1.historical_data_structure_flag
+  ) AS row_num 
+FROM 
+  tmp_tbl_tac_technical_names_1_1 AS tac_1 
+  LEFT JOIN tmp_tbl_cust_656_postal_codes AS pc656 ON tac_1.ship_to_party_id = pc656.ship_to_party_id 
+  LEFT JOIN tmp_tbl_cust_656 AS c656 ON c656.customer_id = pc656.ship_to_party_id 
+  LEFT JOIN tmp_tbl_distinct_otd_vfr AS vfr ON vfr.shpmt_id = tac_1.load_id 
+  LEFT JOIN tmp_tbl_subsector_sum_step AS sss ON tac_1.load_id = sss.shpmt_id 
+  LEFT JOIN tmp_tbl_costs ON tac_1.load_id = tmp_tbl_costs.shpmt_id 
+  AND tac_1.freight_auction_flag = tmp_tbl_costs.freight_auction_flag 
+  LEFT JOIN tmp_tbl_distinct_vendor_1 AS vmd2 ON tac_1.forward_agent_id = vmd2.vendor_account_num 
+  LEFT JOIN tmp_tbl_dest AS dst ON tac_1.ship_to_party_id = dst.ship_to_party_id 
+  AND tac_1.load_id = dst.load_id 
+  AND tac_1.freight_type_code = dst.freight_type_code 
+  LEFT JOIN tmp_tbl_distinct_vendor_2 AS vmd ON REGEXP_REPLACE(tac_1.actual_carr_id, '^0+', '') = vmd.vendor_account_num
+"""
+spark.sql(tmp_tbl_tac_technical_names_2_1)
