@@ -1,0 +1,145 @@
+    TAC_DETAIL_ONLY = f"""
+select *, 
+Case
+when scotts_magical_field_of_dreams = 'Carrier Response' Then
+	case 
+		when 	`tender_event_type_description` = 'Tender Accepted' Then
+			case 
+				when carrier_id != actual_carrier_id Then
+					'Carrier didn’t actually ship the load'				
+				when carrier_id = actual_carrier_id  Then
+					case 
+                        when true_fa_flag = 'Y' Then
+                            'Freight Auction Rate Adjustment'
+                        when tms_service_code = 'TDCP' Then
+                             'Dynamic Pricing'
+                        when SF_awards < 0.02 then
+                             'No Award on Lane'
+                        else 'This row counts'
+					end 
+				
+			end
+		else 
+			tender_event_type_description
+		end 
+Else 
+	'Tender Event'
+end as `Why_row_not_counted_toward_award`,
+
+Case
+when scotts_magical_field_of_dreams = 'Carrier Response' Then
+	case 
+		when `tender_event_type_description` = 'Tender Accepted' Then
+			case 
+				when carrier_id != actual_carrier_id Then
+                       0 		
+				when carrier_id = actual_carrier_id  Then
+					case 
+					when true_fa_flag = 'Y' Then
+						  0
+					when tms_service_code = 'TDCP' Then
+						  0
+					when SF_awards < 0.02 then
+						  0
+					else  1
+					end 
+				
+			end
+		else 
+			 0
+		end 
+Else 
+	 0
+end as accept_count,
+Case
+when scotts_magical_field_of_dreams = 'Carrier Response' and `tender_event_type_description` = 'Tender Accepted'  and carrier_id != actual_carrier_id then
+   1 
+  else (total_count-accept_count_temp) 
+end as reject_count,
+case
+  when tender_event_type_code = 'TENDFRST' then
+    accessorial_temp
+  when tender_event_type_code != 'TENDFRST' then
+  0
+  else 
+   accessorial_temp
+end as accessorial,
+case
+  when tender_event_type_code = 'TENDFRST' then
+  actual_carrier_total_transportation_cost_usd_temp
+  when tender_event_type_code != 'TENDFRST' then
+  0
+  else 
+  actual_carrier_total_transportation_cost_usd_temp
+end as actual_carrier_total_transportation_cost_usd,
+case
+  when tender_event_type_code = 'TENDFRST' then
+  cnc_carrier_mix_temp
+  when tender_event_type_code != 'TENDFRST' then
+  0
+  else 
+  cnc_carrier_mix_temp
+end as cnc_carrier_mix,
+case
+  when tender_event_type_code = 'TENDFRST' then
+  fuel_temp
+  when tender_event_type_code != 'TENDFRST' then
+  0
+  else 
+  fuel_temp
+end as fuel,
+case
+  when tender_event_type_code = 'TENDFRST' then
+  incremental_fa_temp
+  when tender_event_type_code != 'TENDFRST' then
+  0
+  else 
+  incremental_fa_temp
+end as incremental_fa,
+case
+  when tender_event_type_code = 'TENDFRST' then
+  linehaul_temp
+  when tender_event_type_code != 'TENDFRST' then
+  0
+  else 
+  linehaul_temp
+end as linehaul,
+case
+  when tender_event_type_code = 'TENDFRST' then
+  unsourced_temp
+  when tender_event_type_code != 'TENDFRST' then 
+  0
+  else unsourced_temp
+end as unsourced,
+concat(SF_Lane , `load_id` , tender_event_type_code , week_begin_date, carrier_id , tms_service_code) As MattKey,
+case
+when customer_level_12_description LIKE '%SF_%'
+then customer_level_12_description
+when country_to like '%CA%' AND customer_level_12_description LIKE '%LOBLAWS%'
+then 'LOBLAWS INC'
+when country_to like '%CA%' AND customer_level_12_description LIKE '%COSTCO%'
+then 'COSTCO CANADA'
+when country_to like '%CA%' AND customer_level_12_description LIKE '%WALMART / MONARCH %'
+then 'WAL-MART CANADA CORP'
+when country_to like '%CA%' AND customer_level_12_description LIKE '%WAL-MART %'
+then 'WAL-MART CANADA CORP'
+when country_to like '%CA%' AND customer_level_12_description LIKE '%WALMART %'
+then 'WAL-MART CANADA CORP'
+when country_to like '%CA%' AND customer_level_12_description LIKE '%SUPPLY CHAIN %'
+then 'WAL-MART CANADA CORP'
+when country_to not like '%CA%' AND customer_level_12_description LIKE '%WALMART.COM%'
+then 'WAL-MART.COM'
+when country_to not like '%CA%' and customer_level_12_description LIKE 'SAMS %'
+then 'WMRT - TOTAL SAMS'
+when country_to not like '%CA%' and customer_level_12_description LIKE 'SAM\'S %'
+then 'WMRT - TOTAL SAMS'
+when country_to not like '%CA%' and customer_level_12_description LIKE '%Kroger%'
+then 'THE KROGER COMPANY'
+when country_to not like '%CA%' and customer_level_12_description LIKE '%Kroger%'
+then 'THE KROGER COMPANY'
+else customer_level_4_description
+end as customer
+from TAC_Detail_Only_temp where tender_event_date >= '2019-07-01'
+;
+"""
+    TAC_DETAIL_ONLY_STAR = spark.sql(TAC_DETAIL_ONLY)
