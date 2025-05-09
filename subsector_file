@@ -1,0 +1,236 @@
+
+    ds_subsectorcosts_noloadid_v13 = f"""
+CREATE TEMPORARY VIEW ds_subsectorcosts_noloadid_v13 as
+SELECT
+       load_id
+     , voucher_id
+     , service_tms_code
+     , freight_type
+     , country_to
+     , dltl
+     , dst
+     , fuel
+     , exm
+     , lh_rules
+     , weighted_average_rate_adjusted_long
+     , accrual_cost_adjusted
+     , accessorial_costs
+     , weighted_average_rate_adjusted
+     , distance_per_load_dec
+     , unsourced_costs
+     , line_haul_final
+     , total_cost
+     , origin_zone
+     , customer_description
+     , carrier_description
+     , actual_gi_date
+     , goods_receipt_posting_date
+     , created_date
+     , ship_to_id
+     , freight_auction
+     , historical_data_structure_flag
+     , destination_postal
+     , origin_sf
+     , destination_sf
+     , truckload_vs_intermodal_val
+     , subsector_update AS subsector
+     , fy
+     , su_per_load
+     , scs
+     , ftp
+     , tsc
+     , flat
+     , fa_a
+     , steps_ratio_dec
+     , cnc_costs
+     , freight_auction_costs
+     , country_to_description
+     , customer_l8
+     , distance_per_load
+     , ship_to_description
+     , destination_zone_new
+FROM
+       (
+                 SELECT
+                           null_final.load_id                                                                    AS load_id
+                         , null_final.voucher_id                                                                 AS voucher_id
+                         , null_final.subsector                                                                  AS subsector
+                         , null_final.service_tms_code                                                           AS service_tms_code
+                         , null_final.freight_type                                                               AS freight_type
+                         , null_final.country_to                                                                 AS country_to
+                         , null_final.dltl                                                                       AS dltl
+                         , null_final.dst                                                                        AS dst
+                         , null_final.fuel                                                                       AS fuel
+                         , null_final.exm                                                                        AS exm
+                         , null_final.lh_rules                                                                   AS lh_rules
+                         , null_final.weighted_average_rate_adjusted_long                                        AS weighted_average_rate_adjusted_long
+                         , null_final.accrual_cost_adjusted                                                      AS accrual_cost_adjusted
+                         , null_final.accessorial_costs                                                          AS accessorial_costs
+                         , null_final.weighted_average_rate_adjusted                                             AS weighted_average_rate_adjusted
+                         , null_final.distance_per_load_dec                                                      AS distance_per_load_dec
+                         , null_final.unsourced_costs                                                            AS unsourced_costs
+                         , null_final.line_haul_final                                                            AS line_haul_final
+                         , null_final.total_cost                                                                 AS total_cost
+                         , tfs_max.origin_zone                                                                   AS origin_zone
+                         , tfs_max.destination_zone                                                              AS destination_zone
+                         , tfs_max.customer_description                                                          AS customer_description
+                         , tfs_max.carrier_description                                                           AS carrier_description
+                         , tfs_max.actual_gi_date                                                                AS actual_gi_date
+                         , tfs_max.goods_receipt_posting_date                                                    AS goods_receipt_posting_date
+                         , tfs_max.created_date                                                                  AS created_date
+                         , tfs_max.ship_to_id                                                                    AS ship_to_id
+                         , tfs_max.freight_auction                                                               AS freight_auction
+                         , tfs_max.historical_data_structure_flag                                                AS historical_data_structure_flag
+                         , tfs_max.destination_postal                                                            AS destination_postal
+                         , tfs_max.origin_sf                                                                     AS origin_sf
+                         , tfs_max.destination_sf                                                                AS destination_sf
+                         , tfs_max.truckload_vs_intermodal_val                                                   AS truckload_vs_intermodal_val
+                         , regexp_replace(regexp_replace(null_final.subsector,' SUB-SECTOR',''),' SUBSECTOR','') AS subsector_update
+                         , case
+                                     WHEN MONTH(TO_DATE(actual_gi_date)) < 7
+                                               THEN CONCAT('FY',SUBSTR(CAST(YEAR(TO_DATE(actual_gi_date))-1 AS STRING),-2,2),SUBSTR(CAST(YEAR(TO_DATE(actual_gi_date)) AS STRING),-2,2))
+                                               ELSE CONCAT('FY',SUBSTR(CAST(YEAR(TO_DATE(actual_gi_date)) AS STRING),-2,2),SUBSTR(CAST(YEAR(TO_DATE(actual_gi_date))+1 AS STRING),-2,2))
+                           END AS FY
+                         , 0   AS su_per_load
+                         , 0   AS scs
+                         , 0   AS ftp
+                         , 0   AS tsc
+                         , 0   AS flat
+                         , 0   AS fa_a
+                         , 0   AS steps_ratio_dec
+                         , 0   AS cnc_costs
+                         , 0   AS freight_auction_costs
+                         , ''  AS country_to_description
+                         , ''  AS customer_l8
+                         , 0   AS distance_per_load
+                         , ''  AS ship_to_description
+                         , ''  AS destination_zone_new
+                 FROM
+                           (
+                                  SELECT *
+                                       , (COALESCE(Line_Haul_Final,0) + COALESCE(accessorials,0)+ COALESCE(fuel,0) + COALESCE(Unsourced_Costs,0)) AS Total_Cost
+                                  FROM
+                                         (
+                                                SELECT *
+                                                     , CASE
+                                                              WHEN LH_Rules = 0
+                                                                     THEN COALESCE(dst,0)+COALESCE(exm,0)+COALESCE(dltl,0)
+                                                                     ELSE 0
+                                                       END AS Unsourced_Costs
+                                                     , CASE
+                                                              WHEN LH_Rules = 1
+                                                                     THEN COALESCE(dst,0)+COALESCE(exm,0)+COALESCE(dltl,0)
+                                                                     ELSE 0
+                                                       END AS Line_Haul_Final
+                                                FROM
+                                                       (
+                                                              SELECT *
+                                                                   , CASE
+                                                                            WHEN load_id = "MISSING"
+                                                                                   THEN 1
+                                                                            WHEN freight_type           = "Customer"
+                                                                                   AND service_tms_code = "DSD"
+                                                                                   THEN 1
+                                                                            WHEN service_tms_code IS NULL
+                                                                                   OR service_tms_code IN ("Null"
+                                                                                                         , ''
+                                                                                                         , "HCPU"
+                                                                                                         , "LTL"
+                                                                                                         , "LTL7"
+                                                                                                         , "MES6"
+                                                                                                         , "METL"
+                                                                                                         , "TLOC")
+                                                                                   THEN 1
+                                                                            WHEN country_to = "MX"
+                                                                                   THEN 1
+                                                                            WHEN weighted_average_rate IS NULL
+                                                                                   THEN 0
+                                                                            WHEN weighted_average_rate = 0
+                                                                                   THEN 1
+                                                                            WHEN weighted_average_rate > 0
+                                                                                   THEN 2
+                                                                                   ELSE 3
+                                                                     END                                                       AS LH_Rules
+                                                                   , (weighted_average_rate/cost_ratio)                        AS weighted_average_rate_adjusted_long
+                                                                   , CAST((weighted_average_rate/cost_ratio) AS DECIMAL(30,8)) AS weighted_average_rate_adjusted
+                                                                   , (accrual_cost /cost_ratio)                                AS accrual_cost_adjusted
+                                                                   , COALESCE(accessorials, 0.0000)                            AS accessorial_costs
+                                                                   , CAST(distance_per_load AS DECIMAL(30,8))                  AS distance_per_load_dec
+                                                              FROM
+                                                                     (
+                                                                               SELECT
+                                                                                         null_orig_dest_tfs.load_id                                 AS load_id
+                                                                                       , null_orig_dest_tfs.voucher_id                              AS voucher_id
+                                                                                       , null_orig_dest_tfs.subsector                               AS subsector
+                                                                                       , null_orig_dest_tfs.cost_ratio                              AS cost_ratio
+                                                                                       , null_orig_dest_tfs.accrual_cost                            AS accrual_cost
+                                                                                       , null_orig_dest_tfs.service_tms_code                        AS service_tms_code
+                                                                                       , null_orig_dest_tfs.freight_type                            AS freight_type
+                                                                                       , null_orig_dest_tfs.country_to                              AS country_to
+                                                                                       , null_orig_dest_tfs.distance_per_load                       AS distance_per_load
+
+                                                                                       --, null_orig_dest_tfs.destination_postal                      AS destination_postal
+                                                                                       --, null_orig_dest_tfs.actual_gi_date                          AS actual_gi_date
+                                                                                       --, null_orig_dest_tfs.delivery_id                             AS delivery_id
+                                                                                       --, null_orig_dest_tfs.tdc_val_code                            AS tdc_val_code
+                                                                                       --, null_orig_dest_tfs.freight_cost_charge                     AS freight_cost_charge
+                                                                                       --, null_orig_dest_tfs.total_cost_usd                          AS total_cost_usd
+                                                                                       --, null_orig_dest_tfs.total_cost_local                        AS total_cost_local
+                                                                                       --, null_orig_dest_tfs.su                                      AS su
+                                                                                       --, null_orig_dest_tfs.steps                                   AS steps
+                                                                                       --, null_orig_dest_tfs.cost_grouping                           AS cost_grouping
+                                                                                       --, null_orig_dest_tfs.weighted_average_rate_old               AS weighted_average_rate_old
+                                                                                       --, null_orig_dest_tfs.shipping_point_code                     AS shipping_point_code
+                                                                                       --, null_orig_dest_tfs.destination_zone_new                    AS destination_zone_new
+                                                                                       --, null_orig_dest_tfs.origin_zone                             AS origin_zone
+                                                                                       --, tfs_hist.weighted_average_rate_hist                        AS weighted_average_rate_hist
+                                                                                       --, CAST(tfs_hist.weighted_average_rate_hist AS DECIMAL(30,8)) AS war_dec
+                                                                                       -- ??? ADDED MAX(...
+                                                                                       , MAX(CASE
+                                                                                                   WHEN TO_DATE(actual_gi_date)                    >= '2016-11-01'
+                                                                                                             or weighted_average_rate_old IS NOT NULL
+                                                                                                             THEN weighted_average_rate_old
+                                                                                                   WHEN CAST(tfs_hist.weighted_average_rate_hist AS DECIMAL(30,8)) IS NULL
+                                                                                                             THEN weighted_average_rate_old
+                                                                                                             ELSE CAST(tfs_hist.weighted_average_rate_hist AS DECIMAL(30,8))
+                                                                                         END) AS weighted_average_rate
+                                                                                       , SUM
+                                                                                                   (
+                                                                                                             CASE
+                                                                                                                       WHEN cost_grouping='DLTL'
+                                                                                                                                 THEN total_cost_usd
+                                                                                                             END
+                                                                                                   )
+                                                                                         AS dltl
+                                                                                       , SUM
+                                                                                                   (
+                                                                                                             CASE
+                                                                                                                       WHEN cost_grouping='DST'
+                                                                                                                                 THEN total_cost_usd
+                                                                                                             END
+                                                                                                   )
+                                                                                         AS dst
+                                                                                       , SUM
+                                                                                                   (
+                                                                                                             CASE
+                                                                                                                       WHEN cost_grouping='FUEL'
+                                                                                                                                 THEN total_cost_usd
+                                                                                                             END
+                                                                                                   )
+                                                                                         AS fuel
+                                                                                       , SUM
+                                                                                                   (
+                                                                                                             CASE
+                                                                                                                       WHEN cost_grouping='EXM'
+                                                                                                                                 THEN total_cost_usd
+                                                                                                             END
+                                                                                                   )
+                                                                                         AS exm
+                                                                                       , SUM
+                                                                                                   (
+                                                                                                             CASE
+                                                                                                                       WHEN cost_grouping='Accessorials'
+                                                                                                                                 THEN total_cost_usd
+                                                                                                             END
+                                                                                                   )
+                                                                                         AS accessorials
