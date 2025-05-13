@@ -1,0 +1,43 @@
+CASE
+    WHEN LENGTH(freight_stats_na_merged_star.`orign_zone_for_tfs_name`) = 60 
+         AND INSTR(freight_stats_na_merged_star.`orign_zone_for_tfs_name`, '-') = 56 
+         THEN SUBSTRING(freight_stats_na_merged_star.`orign_zone_for_tfs_name`, 51, 5)
+         
+    WHEN LENGTH(freight_stats_na_merged_star.`orign_zone_for_tfs_name`) = 60 
+         AND SUBSTRING(freight_stats_na_merged_star.`orign_zone_for_tfs_name`, 51, 8) = '00000000' 
+         THEN SUBSTRING(freight_stats_na_merged_star.`orign_zone_for_tfs_name`, LENGTH(freight_stats_na_merged_star.`orign_zone_for_tfs_name`) - 1, 2)
+
+    WHEN LENGTH(freight_stats_na_merged_star.`orign_zone_for_tfs_name`) = 60 
+         AND SUBSTRING(freight_stats_na_merged_star.`orign_zone_for_tfs_name`, 51, 7) = '0000000' 
+         THEN SUBSTRING(freight_stats_na_merged_star.`orign_zone_for_tfs_name`, LENGTH(freight_stats_na_merged_star.`orign_zone_for_tfs_name`) - 2, 3)
+
+    WHEN LENGTH(freight_stats_na_merged_star.`orign_zone_for_tfs_name`) = 60 
+         AND SUBSTRING(freight_stats_na_merged_star.`orign_zone_for_tfs_name`, 51, 5) = '00000' 
+         THEN SUBSTRING(freight_stats_na_merged_star.`orign_zone_for_tfs_name`, LENGTH(freight_stats_na_merged_star.`orign_zone_for_tfs_name`) - 4, 5)
+
+    WHEN LENGTH(freight_stats_na_merged_star.`orign_zone_for_tfs_name`) = 60 
+         AND SUBSTRING(freight_stats_na_merged_star.`orign_zone_for_tfs_name`, 51, 4) = '0000' 
+         THEN SUBSTRING(freight_stats_na_merged_star.`orign_zone_for_tfs_name`, LENGTH(freight_stats_na_merged_star.`orign_zone_for_tfs_name`) - 5, 6)
+
+    WHEN LENGTH(freight_stats_na_merged_star.`orign_zone_for_tfs_name`) = 60 
+         AND SUBSTRING(freight_stats_na_merged_star.`orign_zone_for_tfs_name`, 51, 3) = '000' 
+         THEN CONCAT(
+             SUBSTRING(freight_stats_na_merged_star.`orign_zone_for_tfs_name`, 54, 3), 
+             SUBSTRING(freight_stats_na_merged_star.`orign_zone_for_tfs_name`, 58, 3)
+         )
+
+    WHEN LENGTH(freight_stats_na_merged_star.`orign_zone_for_tfs_name`) = 60 
+         THEN SUBSTRING(freight_stats_na_merged_star.`orign_zone_for_tfs_name`, LENGTH(freight_stats_na_merged_star.`orign_zone_for_tfs_name`) - 9, 10)
+
+    WHEN LENGTH(freight_stats_na_merged_star.`orign_zone_for_tfs_name`) = 7 
+         AND POSITION(' ' IN freight_stats_na_merged_star.`orign_zone_for_tfs_name`) > 0 
+         THEN CONCAT(
+             SUBSTRING(freight_stats_na_merged_star.`orign_zone_for_tfs_name`, 1, 3), 
+             SUBSTRING(freight_stats_na_merged_star.`orign_zone_for_tfs_name`, 5, 3)
+         )
+
+    WHEN freight_stats_na_merged_star.`orign_zone_for_tfs_name` IS NULL 
+         THEN shipping_location.`corporate id 2`
+
+    ELSE freight_stats_na_merged_star.`orign_zone_for_tfs_name`
+END AS `orign_zone_for_tfs_name`
