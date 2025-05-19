@@ -1,0 +1,341 @@
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import (
+    col, when, lit, expr, concat_ws, substring, length, instr, concat,
+    coalesce, upper, from_unixtime, unix_timestamp
+)
+
+spark = SparkSession.builder.getOrCreate()
+
+# -----------------------------------------------------------------
+# STEP 0: Load all source DataFrames (adjust the table names as needed)
+# -----------------------------------------------------------------
+df_fs    = spark.table("freight_stats_na_merged_star")
+df_jct   = spark.table("joined_id_tfs_cad_tac")
+df_mer   = spark.table("month_exchng_rate_rds")
+df_tms   = spark.table("tms_charge_id")
+df_cust  = spark.table("cust_656_postal_codes")
+df_matl  = spark.table("matl_doc_num_and_bop")
+df_tdc   = spark.table("tdc_val_and_bop")
+df_shloc = spark.table("shipping_location")
+df_dest  = spark.table("dest_loc_id_from_tac")
+
+# -----------------------------------------------------------------
+# STEP 1: Build the inner join ("joined_table") equivalent
+# This joins df_fs with all other tables as in your SQL's inner subquery.
+# -----------------------------------------------------------------
+df_joined = df_fs.alias("fs") \
+    .join(df_jct.alias("jct"),
+          col("fs.shpmt_id") == col("jct.shpmt_id"),
+          "left_outer") \
+    .join(df_mer.alias("mer"),
+          expr("concat_ws('-', substring(fs.gr_posting_date,7,4), substring(fs.gr_posting_date,4,2))") == col("mer.year_month"),
+          "left_outer") \
+    .join(df_tms.alias("tms"),
+          expr("if(fs.frt_cost_chrg_code rlike '0*510', '510', fs.frt_cost_chrg_code)") == col("tms.fcc"),
+          "left_outer") \
+    .join(df_cust.alias("cust"),
+          col("fs.ship_to_num") == col("cust.ship_to_num"),
+          "left_outer") \
+    .join(df_matl.alias("matl"),
+          col("fs.matl_doc_num") == col("matl.matl_doc_num"),
+          "left_outer") \
+    .join(df_tdc.alias("tdc"),
+          col("fs.tdc_val_code") == col("tdc.tdc_val_code"),
+          "left_outer") \
+    .join(df_shloc.alias("shloc"),
+          col("fs.ship_point_code") == col("shloc.`location id`"),
+          "left_outer") \
+    .select(
+         col("fs.shpmt_id").alias("shpmt_id"),
+         col("fs.orign_zone_for_tfs_name").alias("orign_zone_for_tfs_name"),
+         col("fs.destination_zone").alias("destination_zone"),
+         col("fs.ship_to_party_desc").alias("ship_to_party_desc"),
+         col("fs.customer_description").alias("ship_to_party_desc"),  # May be duplicated—verify naming
+         col("fs.carr_desc").alias("carrier_description"),
+         col("fs.voucher_type_code").alias("voucher_type_code"),
+         col("fs.tdc_val_code").alias("tdc_val_code"),
+         col("fs.frt_cost_chrg_code").alias("freight_cost_charge"),
+         col("tms.fcc_desc").alias("tms_freight_charge_description"),
+         col("fs.freight_charge_description_2").alias("freight_charge_description_2"),
+         col("fs.flow_reason").alias("flow_reason"),
+         col("fs.accessorial_reason").alias("accessorial_reason"),
+         col("fs.tot_trans_costs_amt").alias("tot_trans_costs_amt"),
+         # Conversion for USD amounts using IF logic
+         when(col("fs.crncy_code") == "USD", col("fs.adjmt_cost_amt")) \
+            .otherwise(when(col("fs.exchg_rate").isNotNull(), col("fs.adjmt_cost_amt") * col("fs.exchg_rate")).otherwise(lit(None))) \
+            .alias("adjustment_cost_usd"),
+         when(col("fs.crncy_code") == "USD", col("fs.cntrctd_cost_amt")) \
+            .otherwise(when(col("fs.exchg_rate").isNotNull(), col("fs.cntrctd_cost_amt") * col("fs.exchg_rate")).otherwise(lit(None))) \
+            .alias("contracted_cost_usd"),
+         when(col("fs.crncy_code") == "USD", col("fs.post_chrgs_cost_amt")) \
+            .otherwise(when(col("fs.exchg_rate").isNotNull(), col("fs.post_chrgs_cost_amt") * col("fs.exchg_rate")).otherwise(lit(None))) \
+            .alias("post_charge_cost_usd"),
+         when(col("fs.crncy_code") == "USD", col("fs.spot_rate_chrgs_amt")) \
+            .otherwise(when(col("fs.exchg_rate").isNotNull(), col("fs.spot_rate_chrgs_amt") * col("fs.exchg_rate")).otherwise(lit(None))) \
+            .alias("spot_cost_usd"),
+         when(col("fs.crncy_code") == "USD", col("fs.misc_cost_amt")) \
+            .otherwise(when(col("fs.exchg_rate").isNotNull(), col("fs.misc_cost_amt") * col("fs.exchg_rate")).otherwise(lit(None))) \
+            .alias("miscelaneous_cost_usd"),
+         col("fs.wght_per_shpmt_per_dlvry_qty").alias("wight_per_load"),
+         col("fs.vol_per_shpmt_per_dlvry_qty").alias("volume_per_load"),
+         col("fs.floor_postn_qty").alias("floor_positions_as_shipped"),
+         col("fs.pllts_thrcl_qty").alias("theoretical_pallets"),
+         col("fs.gi_goods_issue_shpmt_date").alias("actual_gi_date"),
+         col("fs.reasn_code").alias("charge_code_reason_code"),
+         col("fs.dlvry_id").alias("delivery_id_#"),
+         col("fs.proft_center_code").alias("proft_center_code"),
+         col("fs.ctrng_area_code").alias("ctrng_area_code"),
+         col("fs.dstnc_qty").alias("distance"),
+         col("fs.dstnc_uom").alias("distance_unit_of_measure"),
+         col("fs.wght_tot_qty").alias("total_weight_as_shipped"),
+         col("fs.wght_uom").alias("weight_unit_of_measure"),
+         col("fs.vol_qty").alias("total_volume_as_shipped"),
+         col("fs.vol_uom").alias("volume_unit_of_measure"),
+         col("fs.crncy_code").alias("currency"),
+         col("fs.ship_to_num").alias("ship_to_num"),
+         col("fs.regn_from_code").alias("region_from_code"),
+         col("fs.regn_to_code").alias("region_to_description"),
+         col("fs.cntry_to_code").alias("country_to"),
+         col("fs.categ_code").alias("category_code"),
+         col("fs.sectr_name").alias("sector_description"),
+         col("fs.sbstr_name").alias("subsector_description"),
+         col("fs.voucher_sttus_name").alias("voucher_status"),
+         col("fs.voucher_ref_num").alias("voucher_reference_#"),
+         col("fs.cntry_from_desc").alias("country_from_description"),
+         col("fs.cntry_to_desc").alias("country_to_description"),
+         col("fs.equip_mode_desc").alias("equipment_mode_description"),
+         col("fs.regn_from_desc").alias("region_from_description"),
+         col("fs.table_uom").alias("table_uom"),
+         col("fs.ship_point_desc").alias("origin_description"),
+         col("fs.cost_center_id").alias("cost_center"),
+         col("fs.voucher_id").alias("voucher_id"),
+         col("fs.multi_stop_ind").alias("multi_stop_flag"),
+         col("fs.temp_protect_ind").alias("temp_protect"),
+         col("fs.spot_flag_val").alias("spot_flag_val"),
+         col("fs.gbu_code").alias("gbu_code"),
+         col("fs.gr_posting_date").alias("goods_receipt_posting_date"),
+         col("fs.created_datetm").alias("created_time"),
+         col("fs.created_date").alias("created_date"),
+         col("fs.na_trgt_cntry_code").alias("na_target_country_code"),
+         col("fs.ship_to_num").alias("ship_to_num"),
+         col("fs.ship_point_code").alias("shipping_point_code"),
+         col("fs.trans_plan_point_code").alias("transportation_planning_point"),
+         col("fs.equip_mode_code").alias("equipment_mode_code"),
+         col("fs.trnsp_type_code").alias("transportation_equipment_type_code"),
+         col("fs.frt_type_code").alias("freight_type_customer_interplant_indicator"),
+         col("fs.cntry_from_code").alias("country_from_code"),
+         col("fs.chrg_level_for_tms_intfc_name").alias("charge_level_description"),
+         col("fs.chrg_kind_for_tms_intfc_name").alias("charge_kind_description"),
+         col("fs.reasn_code_tms_intfc").alias("reason_code_cost_tms_interface"),
+         col("fs.chart_acct_num").alias("chart_acct_num"),
+         col("fs.steps_num").alias("steps"),
+         col("fs.company_code").alias("company_code"),
+         col("fs.tdc_val_desc").alias("tdc_val_description"),
+         col("fs.bill_frt_created_date").alias("freight_bill_created_date"),
+         col("fs.dlvry_item_count").alias("dlvry_item_count"),
+         col("fs.carr_country_name").alias("carr_country_name"),
+         col("fs.carr_country_code").alias("carr_country_code"),
+         col("fs.carr_postal_code").alias("carr_postal_code"),
+         col("fs.ship_to_postal_code").alias("ship_to_postal_code"),
+         col("fs.ship_to_state_code").alias("ship_to_state_code"),
+         col("fs.ship_to_state_name").alias("ship_to_state_name"),
+         col("fs.minority_ind_val").alias("minority_ind_val"),
+         col("fs.dest_zone_go_name").alias("dest_zone_go_name"),
+         col("fs.origin_zone_name").alias("origin_zone_name"),
+         col("fs.dest_loc_code").alias("dest_loc_code"),
+         col("fs.chrg_detail_id").alias("charge_detail_id"),
+         col("fs.matl_doc_num").alias("material_document_#"),
+         col("fs.purch_doc_num").alias("purchasing_document_#"),
+         col("fs.chrg_kindc_num").alias("charge_kind_code"),
+         col("fs.chrg_level_num").alias("charge_level_code"),
+         col("fs.billg_prpsl_num").alias("billing_proposal_no"),
+         col("fs.gl_acct_num").alias("gl_account_#"),
+         col("fs.shpmt_dlvry_pllts_qty").alias("underlying_data_for_pallets_calc2"),
+         col("fs.pllt_qty").alias("underlying_data_for_pallets_calc"),
+         col("fs.tot_trans_costs_amt").alias("total_transportation_cost_local_currency"),
+         col("fs.step_cost_intfc_tms_amt").alias("cost_on_step_local_currency"),
+         col("fs.adjmt_cost_amt").alias("adjustment_cost_local_currency"),
+         col("fs.cntrctd_cost_amt").alias("contracted_cost_local_currency"),
+         col("fs.post_chrgs_cost_amt").alias("post_charge_cost_local_currency"),
+         col("fs.spot_rate_chrgs_amt").alias("spot_cost_local_currency"),
+         col("fs.misc_cost_amt").alias("miscelaneous_cost_local_currency"),
+         col("fs.tfts_load_tmstp").alias("tfts_load_tmstp"),
+         col("fs.load_from_file").alias("load_from_file"),
+         col("fs.carr_id").alias("carrier_id"),
+         col("fs.bd_mod_tmstp").alias("bd_mod_tmstp"),
+         col("fs.frt_auction_ind").alias("freight_auction"),
+         lit("-").alias("historical_data_structure_flag"),
+         lit("-").alias("origin_longitude"),
+         lit("-").alias("origin_latitude"),
+         lit("-").alias("destination_longitude"),
+         lit("-").alias("destination_latitude"),
+         col("fs.destination_postal").alias("destination_postal")
+    )
+
+# -----------------------------------------------------------------
+# STEP 2: Apply CASE conditions on columns from df_fs (or their aliases)
+# Example: Complex CASE on orign_zone_for_tfs_name (and similarly dest_zone_go and origin_zone_name)
+# -----------------------------------------------------------------
+df_phase1 = df_joined.withColumn(
+    "orign_zone_for_tfs_name",
+    when((length(col("orign_zone_for_tfs_name")) == 60) & (instr(col("orign_zone_for_tfs_name"), "-") == 56),
+         substring(col("orign_zone_for_tfs_name"), 51, 5)) \
+    .when((length(col("orign_zone_for_tfs_name")) == 60) & (substring(col("orign_zone_for_tfs_name"), 51, 8) == "00000000"),
+         substring(col("orign_zone_for_tfs_name"), -2, 2)) \
+    .when((length(col("orign_zone_for_tfs_name")) == 60) & (substring(col("orign_zone_for_tfs_name"), 51, 7) == "0000000"),
+         substring(col("orign_zone_for_tfs_name"), -3, 3)) \
+    .when((length(col("orign_zone_for_tfs_name")) == 60) & (substring(col("orign_zone_for_tfs_name"), 51, 5) == "00000"),
+         substring(col("orign_zone_for_tfs_name"), -5, 5)) \
+    .when((length(col("orign_zone_for_tfs_name")) == 60) & (substring(col("orign_zone_for_tfs_name"), 51, 4) == "0000"),
+         substring(col("orign_zone_for_tfs_name"), -6, 6)) \
+    .when((length(col("orign_zone_for_tfs_name")) == 60) & (substring(col("orign_zone_for_tfs_name"), 51, 3) == "000"),
+         concat(substring(col("orign_zone_for_tfs_name"), 54, 3),
+                substring(col("orign_zone_for_tfs_name"), 58, 3))) \
+    .when(length(col("orign_zone_for_tfs_name")) == 60,
+         substring(col("orign_zone_for_tfs_name"), -10, 10)) \
+    .when((length(col("orign_zone_for_tfs_name")) == 7) & (instr(col("orign_zone_for_tfs_name"), " ") > 0),
+         concat(substring(col("orign_zone_for_tfs_name"), 1, 3),
+                substring(col("orign_zone_for_tfs_name"), 5, 3))) \
+    .when(col("orign_zone_for_tfs_name").isNull(),
+         col("shloc.`corporate id 2`")) \
+    .otherwise(col("orign_zone_for_tfs_name"))
+)
+
+df_phase2 = df_phase1.withColumn(
+    "dest_zone_go_name",
+    when((length(col("dest_zone_go_val")) == 60) & (instr(col("dest_zone_go_val"), "-") == 56),
+         substring(col("dest_zone_go_val"), 51, 5)) \
+    .when((length(col("dest_zone_go_val")) == 60) & (substring(col("dest_zone_go_val"), 51, 8) == "00000000"),
+         substring(col("dest_zone_go_val"), -2, 2)) \
+    .when((length(col("dest_zone_go_val")) == 60) & (substring(col("dest_zone_go_val"), 51, 7) == "0000000"),
+         substring(col("dest_zone_go_val"), -3, 3)) \
+    .when((length(col("dest_zone_go_val")) == 60) & (substring(col("dest_zone_go_val"), 51, 5) == "00000"),
+         substring(col("dest_zone_go_val"), -5, 5)) \
+    .when((length(col("dest_zone_go_val")) == 60) & (substring(col("dest_zone_go_val"), 51, 4) == "0000"),
+         substring(col("dest_zone_go_val"), -6, 6)) \
+    .when((length(col("dest_zone_go_val")) == 60) & (substring(col("dest_zone_go_val"), 51, 3) == "000"),
+         concat(substring(col("dest_zone_go_val"), 54, 3),
+                substring(col("dest_zone_go_val"), 58, 3))) \
+    .when(length(col("dest_zone_go_val")) == 60,
+         substring(col("dest_zone_go_val"), -10, 10)) \
+    .when((length(col("dest_zone_go_val")) == 7) & (instr(col("dest_zone_go_val"), " ") > 0),
+         concat(substring(col("dest_zone_go_val"), 1, 3),
+                substring(col("dest_zone_go_val"), 5, 3))) \
+    .otherwise(col("dest_zone_go_val"))
+)
+
+df_phase3 = df_phase2.withColumn(
+    "origin_zone_name",
+    when((length(col("origin_zone_name")) == 60) & (instr(col("origin_zone_name"), "-") == 56),
+         substring(col("origin_zone_name"), 51, 5)) \
+    .when((length(col("origin_zone_name")) == 60) & (substring(col("origin_zone_name"), 51, 8) == "00000000"),
+         substring(col("origin_zone_name"), -2, 2)) \
+    .when((length(col("origin_zone_name")) == 60) & (substring(col("origin_zone_name"), 51, 7) == "0000000"),
+         substring(col("origin_zone_name"), -3, 3)) \
+    .when((length(col("origin_zone_name")) == 60) & (substring(col("origin_zone_name"), 51, 5) == "00000"),
+         substring(col("origin_zone_name"), -5, 5)) \
+    .when((length(col("origin_zone_name")) == 60) & (substring(col("origin_zone_name"), 51, 4) == "0000"),
+         substring(col("origin_zone_name"), -6, 6)) \
+    .when((length(col("origin_zone_name")) == 60) & (substring(col("origin_zone_name"), 51, 3) == "000"),
+         concat(substring(col("origin_zone_name"), 54, 3),
+                substring(col("origin_zone_name"), 58, 3))) \
+    .when(length(col("origin_zone_name")) == 60,
+         substring(col("origin_zone_name"), -10, 10)) \
+    .when((length(col("origin_zone_name")) == 7) & (instr(col("origin_zone_name"), " ") > 0),
+         concat(substring(col("origin_zone_name"), 1, 3),
+                substring(col("origin_zone_name"), 5, 3))) \
+    .otherwise(col("origin_zone_name"))
+)
+
+# -----------------------------------------------------------------
+# STEP 3: Additional CASE conditions for joined table columns (e.g. dest_loc_code and destination_zone)
+# -----------------------------------------------------------------
+df_phase4 = df_phase3 \
+    .withColumn("dest_loc_code",
+        when(col("fs.freight_type") == "Customer", col("fs.ship_to_num"))
+        .when(col("fs.freight_type") == "Interplant",
+              coalesce(col("temp_tfs.ship_to_party_id"), col("fs.dest_loc_code"), col("fs.ship_to_num")))
+        .otherwise(col("fs.ship_to_num"))
+    ) \
+    .withColumn("destination_zone",
+        when((length(col("jct.destination_zone")) == 60) & (instr(col("jct.destination_zone"), "-") == 56),
+             substring(col("jct.destination_zone"), 51, 5)) \
+        .when((length(col("jct.destination_zone")) == 60) & (substring(col("jct.destination_zone"), 51, 8) == "00000000"),
+             substring(col("jct.destination_zone"), -2, 2)) \
+        .when((length(col("jct.destination_zone")) == 60) & (substring(col("jct.destination_zone"), 51, 7) == "0000000"),
+             substring(col("jct.destination_zone"), -3, 3)) \
+        .when((length(col("jct.destination_zone")) == 60) & (substring(col("jct.destination_zone"), 51, 5) == "00000"),
+             substring(col("jct.destination_zone"), -5, 5)) \
+        .when((length(col("jct.destination_zone")) == 60) & (substring(col("jct.destination_zone"), 51, 4) == "0000"),
+             substring(col("jct.destination_zone"), -6, 6)) \
+        .when((length(col("jct.destination_zone")) == 60) & (substring(col("jct.destination_zone"), 51, 3) == "000"),
+             concat(substring(col("jct.destination_zone"), 54, 3),
+                    substring(col("jct.destination_zone"), 58, 3))) \
+        .when(length(col("jct.destination_zone")) == 60,
+             substring(col("jct.destination_zone"), -10, 10)) \
+        .when((length(col("jct.destination_zone")) == 7) & (instr(col("jct.destination_zone"), " ") > 0),
+             concat(substring(col("jct.destination_zone"), 1, 3), substring(col("jct.destination_zone"), 5, 3)))
+        .otherwise(col("jct.destination_zone"))
+    )
+
+# -----------------------------------------------------------------
+# STEP 4: Final outer join and selection including additional CASE conditions over fs (freight_stats_na_merged_star)
+# -----------------------------------------------------------------
+df_final = df_phase4.alias("fs") \
+    .join(df_dest.alias("temp_tfs"),
+          (col("fs.shpmt_id") == col("temp_tfs.load_id")) &
+          (upper(col("fs.freight_type")) == upper(col("temp_tfs.freight_type_code"))),
+          "left_outer") \
+    .select(
+        # CASE for freight_type from fs
+        when(col("fs.frt_type_code").like("%C%"), lit("Customer"))
+         .when(col("fs.frt_type_code").like("%I%"), lit("Interplant"))
+         .when(col("fs.frt_type_code").like("%E%") & (substring(col("fs.ship_to_num"), 1, 1) == "P"), lit("Interplant"))
+         .otherwise(lit("Customer")).alias("freight_type"),
+        # truckload vs intermodal condition from jct
+        when(col("jct.truckload_vs_intermodal").isNull(), lit("Service code not found"))
+         .otherwise(col("jct.truckload_vs_intermodal")).alias("truckload_vs_intermodal"),
+        col("tms.fcc_desc").alias("fcc_desc"),
+        col("tms.freight_charge_description_2").alias("freight_charge_description_2"),
+        col("tms.flow_reason").alias("flow_reason"),
+        col("tms.accessorial_reason").alias("accessorial_reason"),
+        when((substring(col("fs.ship_to_num"), 1, 1) == "P") & (length(col("fs.ship_to_num")) < 7), lit("I"))
+         .otherwise(lit("C")).alias("operational_freight_type"),
+        when(col("cust.cust_3_name").like("%AB ACQUISITION, LLC%"), lit("ALBERTSONS SAFEWAY"))
+         .when((col("cust.cust_3_name").like("%COSTCO COMPANIES, INC. (WW)%")) & (col("cust.cust_5_name").like("%COSTCO CORP US%")), lit("COSTCO"))
+         .when((col("cust.cust_3_name").like("%COSTCO COMPANIES, INC. (WW)%")) & (col("cust.cust_5_name").like("%COSTCO WHSL (CA)%")), lit("COSTCO CANADA"))
+         .when(col("cust.cust_3_name").like("%BJ%S WHOLESALE (WW)%"), lit("BJS"))
+         .when(col("cust.cust_3_name").like("%CVS CORPORATION US%"), lit("CVS"))
+         .when(col("cust.cust_3_name").like("%TARGET CORP US%"), lit("TARGET"))
+         .when((col("cust.cust_3_name").like("%WAL-MART CORP. (WW)%")) & (col("cust.cust_5_name").like("SAM%")), lit("SAMS"))
+         .when((col("cust.cust_3_name").like("%WAL-MART CORP. (WW)%")) & (col("cust.cust_12_name").like("SAM%")), lit("SAMS"))
+         .when((col("cust.cust_3_name").like("%WAL-MART CORP. (WW)%")) & (~col("cust.cust_5_name").like("SAM%")), lit("WALMART"))
+         .when(col("cust.cust_3_name").like("%Null%"), col("fs.ship_to_party_desc"))
+         .when(col("cust.cust_3_name").isNull(), col("fs.ship_to_party_desc"))
+         .when(col("cust.cust_3_name").like("%THE KROGER CO. US%"), lit("KROGER"))
+         .when(col("cust.cust_3_name").like("%UNKN LVL 3 UNKNOWN CUSTOMER%"), col("fs.ship_to_party_desc"))
+         .otherwise(col("cust.cust_3_name")).alias("customer_description"),
+        when(col("fs.crncy_code") == "USD", col("fs.tot_trans_costs_amt"))
+         .otherwise(when(col("mer.exchg_rate").isNotNull(), col("fs.tot_trans_costs_amt") * col("mer.exchg_rate")).otherwise(lit(None))) \
+         .alias("total_transportation_cost_usd"),
+        col("jct.carrier_desc").alias("1st_tendered_carrier"),
+        col("jct.serv_tms_code").alias("serv_tms_code"),
+        lit("first_tendered_carrier_id").alias("first_tendered_carrier_id"),
+        lit("first_tendered_carrier_description").alias("first_tendered_carrier_description"),
+        lit("first_tendered_carrier_tms_service").alias("first_tendered_carrier_tms_service"),
+        lit("first_tendered_carrier_award").alias("first_tendered_carrier_award"),
+        lit("first_tendered_carrier_rate").alias("first_tendered_carrier_rate"),
+        lit("weighted_average_rate").alias("weighted_average_rate"),
+        col("matl.bu_material").alias("bu_matched_by_material"),
+        col("tdc.bu_tdc").alias("bu_matched_by_tdc"),
+        col("matl.product_category_material").alias("category_matched_by_material"),
+        col("tdc.product_category_tdc").alias("category_matched_by_tdc"),
+        col("jct.dstnc_qty").alias("distance_per_load"),
+        when(col("fs.tfts_load_tmstp").like("%Historical load%"), lit(1))
+         .otherwise(lit(0)).alias("historical_data")
+    )
+
+# -----------------------------------------------------------------
+# STEP 5: Write the final DataFrame as the Hive table "tfs_technical_names_merged_2"
+# -----------------------------------------------------------------
+df_final.write.mode("overwrite").saveAsTable("tfs_technical_names_merged_2")
