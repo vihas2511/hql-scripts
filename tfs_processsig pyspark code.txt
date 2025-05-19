@@ -1,0 +1,1936 @@
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, when, substring, max as spark_max, countDistinct
+
+# Assume you have a SparkSession running
+spark = SparkSession.builder.getOrCreate()
+
+# Define your database name (update this to reflect your environment)
+dbTransVsbltBw = "your_database_name"
+
+# Load the source tables as DataFrames
+freight_stats_df = spark.table(f"{dbTransVsbltBw}.freight_stats_na_merged_star")
+cad_df = spark.table(f"{dbTransVsbltBw}.contract_adherence_na_merged_star")
+tac_df = spark.table(f"{dbTransVsbltBw}.tender_acceptance_na_merged_star")
+
+# ------------------------------------------------------------------------------
+# Step 2: Create a temporary view for distinct shipment IDs (TFS)
+# ------------------------------------------------------------------------------
+distinct_shpmt_id_tfs = freight_stats_df.select("shpmt_id").distinct()
+distinct_shpmt_id_tfs.createOrReplaceTempView("distinct_shpmt_id_tfs")
+
+
+# ------------------------------------------------------------------------------
+# Step 3: Create a temporary view for CAD load IDs (removing leading zeros)
+# ------------------------------------------------------------------------------
+# Option A: Use distinct since you confirmed one destination zone per load_id.
+distinct_load_id_cad = (
+    cad_df.withColumn(
+        "load_id_cad",
+        when(substring("load_id", 1, 4) == "0000", substring("load_id", 5, 100))
+        .otherwise(col("load_id"))
+    )
+    .select(
+        "load_id_cad",
+        col("first_tender_dest_zone_code").alias("destination_zone"),
+        "cntry_to_code",
+        "cust_id"
+    )
+    .distinct()
+)
+distinct_load_id_cad.createOrReplaceTempView("distinct_load_id_cad")
+
+# ------------------------------------------------------------------------------
+# Step 4: Create a temporary view for frt_auction_ind using aggregation
+# ------------------------------------------------------------------------------
+# Instead of a window function to pick the highest value,
+# we group by load_id and take the maximum.
+distinct_load_id_frt_auction_ind_tac = (
+    tac_df.groupBy("load_id")
+    .agg(spark_max("frt_auction_ind").alias("frt_auction_ind"))
+    .withColumnRenamed("load_id", "load_id_tac2")
+)
+distinct_load_id_frt_auction_ind_tac.createOrReplaceTempView("distinct_load_id_frt_auction_ind_tac")
+
+# ------------------------------------------------------------------------------
+# Step 5: Create a temporary view to count distinct tdc_val_code per shipment id
+# ------------------------------------------------------------------------------
+distinct_shpmt_id_count_tdc_val_tfs = (
+    freight_stats_df.groupBy("shpmt_id")
+    .agg(countDistinct("tdc_val_code").alias("tdc_val_code_count"))
+    .withColumnRenamed("shpmt_id", "shpmt_id_tdc")
+)
+distinct_shpmt_id_count_tdc_val_tfs.createOrReplaceTempView("distinct_shpmt_id_count_tdc_val_tfs")
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import when, col, coalesce
+
+# Assuming an active SparkSession
+spark = SparkSession.builder.getOrCreate()
+
+# Use your database name if needed; e.g., dbTransVsbltBw = "your_database_name" 
+# and for tables in that database use f"{dbTransVsbltBw}.table_name". 
+
+# ---------------------------------------------------------------------------
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import when, col, coalesce
+
+# Assuming an active SparkSession and your database name is defined
+spark = SparkSession.builder.getOrCreate()
+dbTransVsbltBw = "your_database_name"  # update as needed
+
+# ---------------------------------------------------------------------------
+# Step 6: Create distinct_ship_to_num_tfs view (and cache it)
+# ---------------------------------------------------------------------------
+# Read the freight_stats table
+freight_stats_df = spark.table(f"{dbTransVsbltBw}.freight_stats_na_merged_star")
+
+# Compute distinct ship_to_num values, cache, and materialize the result
+distinct_ship_to_num_tfs = freight_stats_df.select("ship_to_num").distinct().cache()
+distinct_ship_to_num_tfs.count()  # Triggers the cache materialization
+distinct_ship_to_num_tfs.createOrReplaceTempView("distinct_ship_to_num_tfs")
+
+# ---------------------------------------------------------------------------
+# Step 7: Create distinct_cust_656 view (and cache it)
+# ---------------------------------------------------------------------------
+# Read the customer hierarchy lookup table
+cust_df = spark.table("cust_hierarchy656_na_lkp")
+
+# Replace empty strings with NULL values using when/otherwise
+cust_df_transformed = cust_df.select(
+    col("customer_id"),
+    col("l1_global_name"),
+    when(col("l2_key_customer_group_name") == "", None).otherwise(col("l2_key_customer_group_name")).alias("l2_key_customer_group_name"),
+    when(col("l3_vary1_name") == "", None).otherwise(col("l3_vary1_name")).alias("l3_vary1_name"),
+    when(col("l4_vary2_name") == "", None).otherwise(col("l4_vary2_name")).alias("l4_vary2_name"),
+    when(col("l5_country_top_account_name") == "", None).otherwise(col("l5_country_top_account_name")).alias("l5_country_top_account_name"),
+    when(col("l6_vary6_name") == "", None).otherwise(col("l6_vary6_name")).alias("l6_vary6_name"),
+    when(col("l7_intrmdt_name") == "", None).otherwise(col("l7_intrmdt_name")).alias("l7_intrmdt_name"),
+    when(col("l8_intrmdt2_name") == "", None).otherwise(col("l8_intrmdt2_name")).alias("l8_intrmdt2_name"),
+    when(col("l9_intrmdt3_name") == "", None).otherwise(col("l9_intrmdt3_name")).alias("l9_intrmdt3_name"),
+    when(col("l10_intrmdt4_name") == "", None).otherwise(col("l10_intrmdt4_name")).alias("l10_intrmdt4_name"),
+    when(col("l11_intrmdt5_name") == "", None).otherwise(col("l11_intrmdt5_name")).alias("l11_intrmdt5_name"),
+    when(col("l12_ship_to_name") == "", None).otherwise(col("l12_ship_to_name")).alias("l12_ship_to_name")
+)
+
+# Apply the COALESCE logic to compute customer names
+distinct_cust_656 = cust_df_transformed.select(
+    col("customer_id").alias("CUST_ID"),
+    col("l1_global_name").alias("CUST_1_NAME"),
+    coalesce(col("l2_key_customer_group_name"), col("l1_global_name")).alias("CUST_2_NAME"),
+    coalesce(col("l3_vary1_name"), col("l2_key_customer_group_name"), col("l1_global_name")).alias("CUST_3_NAME"),
+    coalesce(col("l4_vary2_name"), col("l3_vary1_name"), col("l2_key_customer_group_name"), col("l1_global_name")).alias("CUST_4_NAME"),
+    coalesce(col("l5_country_top_account_name"), col("l4_vary2_name"), col("l3_vary1_name"), col("l2_key_customer_group_name"), col("l1_global_name")).alias("CUST_5_NAME"),
+    coalesce(col("l6_vary6_name"), col("l5_country_top_account_name"), col("l4_vary2_name"), col("l3_vary1_name"), col("l2_key_customer_group_name"), col("l1_global_name")).alias("CUST_6_NAME"),
+    coalesce(col("l7_intrmdt_name"), col("l6_vary6_name"), col("l5_country_top_account_name"), col("l4_vary2_name"), col("l3_vary1_name"), col("l2_key_customer_group_name"), col("l1_global_name")).alias("CUST_7_NAME"),
+    coalesce(col("l8_intrmdt2_name"), col("l7_intrmdt_name"), col("l6_vary6_name"), col("l5_country_top_account_name"), col("l4_vary2_name"), col("l3_vary1_name"), col("l2_key_customer_group_name"), col("l1_global_name")).alias("CUST_8_NAME"),
+    coalesce(col("l9_intrmdt3_name"), col("l8_intrmdt2_name"), col("l7_intrmdt_name"), col("l6_vary6_name"), col("l5_country_top_account_name"), col("l4_vary2_name"), col("l3_vary1_name"), col("l2_key_customer_group_name"), col("l1_global_name")).alias("CUST_9_NAME"),
+    coalesce(col("l10_intrmdt4_name"), col("l9_intrmdt3_name"), col("l8_intrmdt2_name"), col("l7_intrmdt_name"), col("l6_vary6_name"), col("l5_country_top_account_name"), col("l4_vary2_name"), col("l3_vary1_name"), col("l2_key_customer_group_name"), col("l1_global_name")).alias("CUST_10_NAME"),
+    coalesce(col("l11_intrmdt5_name"), col("l10_intrmdt4_name"), col("l9_intrmdt3_name"), col("l8_intrmdt2_name"), col("l7_intrmdt_name"), col("l6_vary6_name"), col("l5_country_top_account_name"), col("l4_vary2_name"), col("l3_vary1_name"), col("l2_key_customer_group_name"), col("l1_global_name")).alias("CUST_11_NAME"),
+    coalesce(col("l12_ship_to_name"), col("l11_intrmdt5_name"), col("l10_intrmdt4_name"), col("l9_intrmdt3_name"), col("l8_intrmdt2_name"), col("l7_intrmdt_name"), col("l6_vary6_name"), col("l5_country_top_account_name"), col("l4_vary2_name"), col("l3_vary1_name"), col("l2_key_customer_group_name"), col("l1_global_name")).alias("CUST_12_NAME")
+).cache()
+
+# Trigger caching by materializing the data
+distinct_cust_656.count()
+distinct_cust_656.createOrReplaceTempView("distinct_cust_656")
+
+from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+
+# ---------------------------------------------------------------------------
+# Define database variables (update these as needed)
+dbOsiNa = "your_osina_database"         # For customer_dim table
+dbTransVsbltBw = "your_trans_vsblt_bw_db" # For tender and on_time tables
+
+# ---------------------------------------------------------------------------
+# Step 8: Create postal_codes view
+# ---------------------------------------------------------------------------
+# Load the customer_dim table and filter US/CA customers
+customer_dim_df = spark.table(f"{dbOsiNa}.customer_dim") \
+    .filter(F.col("country_code").isin("US", "CA")) \
+    .select("customer_id", "country_code", "postal_code") \
+    .distinct()
+
+# Transform the postal_code field using the CASE logic:
+#
+# - For US: if the postal_code has '-' at position 6, take the first 5 characters;
+#         otherwise extract the numeric part with a regex.
+# - For CA: if the postal_code is of length 7 and contains a space, concatenate first 3 and last 3 characters;
+#         if the trimmed postal code is empty then output NULL;
+#         otherwise just take the first 3 characters.
+# - Else: return the original postal_code.
+postal_codes_df = customer_dim_df.select(
+    F.col("customer_id").alias("cust_id"),
+    F.when(
+        (F.col("country_code").like("%US%")) & (F.instr(F.col("postal_code"), "-") == 6),
+        F.substring(F.col("postal_code"), 1, 5)
+    ).when(
+        F.col("country_code").like("%US%"),
+        F.regexp_extract(F.col("postal_code"), r'([0-9]*)(-*[0-9]*)', 1)
+    ).when(
+        (F.col("country_code").like("%CA%")) & (F.length(F.col("postal_code")) == 7) & (F.locate(" ", F.col("postal_code")) > 0),
+        F.concat(F.substring(F.col("postal_code"), 1, 3), F.substring(F.col("postal_code"), 5, 3))
+    ).when(
+        (F.col("country_code").like("%CA%")) & (F.trim(F.col("postal_code")) == ""),
+        F.lit(None)
+    ).when(
+        F.col("country_code").like("%CA%"),
+        F.substring(F.col("postal_code"), 1, 3)
+    ).otherwise(F.col("postal_code")).alias("postal_code")
+)
+
+# Register as a temporary view
+postal_codes_df.createOrReplaceTempView("postal_codes")
+
+
+# ---------------------------------------------------------------------------
+# Step 9: Create cust_656_postal_codes view
+# ---------------------------------------------------------------------------
+# The SQL joins three temporary views:
+#   • distinct_ship_to_num_tfs (assumed already created)
+#   • distinct_cust_656 (assumed already created)
+#   • postal_codes (created in Step 8)
+#
+# Here we join distinct_ship_to_num_tfs (alias 'dst') with distinct_cust_656 (alias 'dc')
+# and postal_codes (alias 'pc') using left outer joins on the matching customer identifiers.
+#
+# We also exclude rows where the ship_to_num column is empty.
+dst_df = spark.table("distinct_ship_to_num_tfs")
+dc_df = spark.table("distinct_cust_656")
+pc_df = spark.table("postal_codes")
+
+cust_656_postal_codes_df = dst_df.alias("dst") \
+    .join(dc_df.alias("dc"), F.col("dst.ship_to_num") == F.col("dc.cust_id"), "left_outer") \
+    .join(pc_df.alias("pc"), F.col("dst.ship_to_num") == F.col("pc.cust_id"), "left_outer") \
+    .filter(F.col("dst.ship_to_num") != "") \
+    .select(
+        F.col("dst.ship_to_num"),
+        F.col("dc.cust_id").alias("656_cust"),
+        F.col("dc.cust_1_name"),
+        F.col("dc.cust_2_name"),
+        F.col("dc.cust_3_name"),
+        F.col("dc.cust_4_name"),
+        F.col("dc.cust_5_name"),
+        F.col("dc.cust_6_name"),
+        F.col("dc.cust_7_name"),
+        F.col("dc.cust_8_name"),
+        F.col("dc.cust_9_name"),
+        F.col("dc.cust_10_name"),
+        F.col("dc.cust_11_name"),
+        F.col("dc.cust_12_name"),
+        F.col("pc.cust_id").alias("postal_codes_cust"),
+        F.col("pc.postal_code")
+    ).distinct()
+
+cust_656_postal_codes_df.createOrReplaceTempView("cust_656_postal_codes")
+
+
+# ---------------------------------------------------------------------------
+# Step 10: Create load_id_orign_zone_frt_type_name_tac view
+# ---------------------------------------------------------------------------
+# Load the tender_acceptance_na_merged_star table and apply a window function.
+# Partition by load_id and order by tender_date DESC, tender_datetm DESC, and orign_zone_code DESC.
+ta_df = spark.table(f"{dbTransVsbltBw}.tender_acceptance_na_merged_star")
+
+windowSpec_ta = Window.partitionBy("load_id") \
+    .orderBy(F.desc("tender_date"), F.desc("tender_datetm"), F.desc("orign_zone_code"))
+
+ta_ranked_df = ta_df.withColumn("rank_no", F.row_number().over(windowSpec_ta))
+load_id_orign_zone_frt_type_name_tac_df = ta_ranked_df.filter(F.col("rank_no") == 1) \
+    .select("load_id", "orign_zone_code", "frt_type_name")
+
+load_id_orign_zone_frt_type_name_tac_df.createOrReplaceTempView("load_id_orign_zone_frt_type_name_tac")
+
+
+# ---------------------------------------------------------------------------
+# Step 11: Create truckload_intermodal_1 view
+# ---------------------------------------------------------------------------
+# Load the on_time_arriv_shpmt_custshpmt_na_merged_star table and use a window function.
+# Partition by shpmt_num and order by serv_tms_code DESC to pick the latest record per shipment.
+ota_df = spark.table(f"{dbTransVsbltBw}.on_time_arriv_shpmt_custshpmt_na_merged_star")
+
+windowSpec_ota = Window.partitionBy("shpmt_num").orderBy(F.desc("serv_tms_code"))
+ota_ranked_df = ota_df.withColumn("rank_num", F.row_number().over(windowSpec_ota))
+truckload_intermodal_1_df = ota_ranked_df.filter(F.col("rank_num") == 1) \
+    .select("shpmt_num", "serv_tms_code", "dest_zone_go_name", "dest_loc_code", "origin_zone_name")
+
+truckload_intermodal_1_df.createOrReplaceTempView("truckload_intermodal_1")
+
+from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField, StringType
+
+# Initialize SparkSession
+spark = SparkSession.builder.getOrCreate()
+
+# Step 12: Drop table if it exists
+spark.sql("DROP TABLE IF EXISTS tms_service_codes_map")
+
+# Define the schema matching the table definition
+schema = StructType([
+    StructField("code_a", StringType(), True),
+    StructField("code_g", StringType(), True),
+    StructField("truckload_intermodal", StringType(), True)
+])
+
+# Prepare the data as a list of tuples (each tuple corresponds to a UNION ALL row)
+data = [
+    ("TLDF", "DO NOT USE AFTER BID", "Truckload"),
+    ("TLSC", "DO NOT USE AFTER BID", "Truckload"),
+    ("TLSD", "DO NOT USE AFTER BID", "Truckload"),
+    ("HCP", "HCPT", "Ocean"),
+    ("TOC", "TOCT", "Ocean"),
+    ("TL", "W01T", "Truckload"),
+    ("TLTO", "W02T", "Truckload"),
+    ("TLBR", "W03T", "Truckload"),
+    ("TLCG", "W04T", "Truckload"),
+    ("TLNO", "W05T", "Truckload"),
+    ("TLDE", "W06T", "Truckload"),
+    ("TLLG", "W07T", "Truckload"),
+    ("TLLT", "W08T", "Truckload"),
+    ("TLHT", "W09T", "Truckload"),
+    ("TLHC", "W10T", "Truckload"),
+    ("TLLH", "W11T", "Truckload"),
+    ("TLEV", "W12T", "Truckload"),
+    ("TLEO", "W13T", "Truckload"),
+    ("TLEC", "W14T", "Truckload"),
+    ("TECO", "W15T", "Truckload"),
+    ("TLLE", "W16T", "Truckload"),
+    ("TELO", "W17T", "Truckload"),
+    ("TLCD", "W18T", "Truckload"),
+    ("TLDS", "W19T", "Truckload"),
+    ("TLDC", "W20T", "Truckload"),
+    ("TLHZ", "W22T", "Truckload"),
+    ("TL2R", "W23T", "Truckload"),
+    ("TLDD", "W25T", "Truckload"),
+    ("TLJ1", "W26T", "Truckload"),
+    ("TLEX", "W27T", "Truckload"),
+    ("W28T", "Y28T", "Truckload"),
+    ("PIM4", "WAP4", "Intermodal"),
+    ("PIM5", "WAP5", "Intermodal"),
+    ("PIM6", "WAP6", "Intermodal"),
+    ("PIM7", "WAP7", "Intermodal"),
+    ("SIM2", "WAS2", "Intermodal"),
+    ("SIM3", "WAS3", "Intermodal"),
+    ("SIM4", "WAS4", "Intermodal"),
+    ("SIM5", "WAS5", "Intermodal"),
+    ("SIM6", "WAS6", "Intermodal"),
+    ("SIM7", "WAS7", "Intermodal"),
+    ("WBS6", "YBS6", "Intermodal"),
+    ("WBS7", "YBS7", "Intermodal"),
+    ("PCD6", "WCP6", "Intermodal"),
+    ("SCD5", "WCS5", "Intermodal"),
+    ("PDC6", "WDP6", "Intermodal"),
+    ("SDC6", "WDS6", "Intermodal"),
+    ("SLD5", "WFS5", "Intermodal"),
+    ("SLD7", "WFS7", "Intermodal"),
+    ("SHZ5", "WGS5", "Intermodal"),
+    ("SHZ7", "WGS7", "Intermodal"),
+    ("TLLD", "W21T", "Truckload"),
+    ("TL2C", "W24T", "Truckload"),
+    ("PIM3", "WAP3", "Intermodal"),
+    ("WBP3", "YBP3", "Intermodal"),
+    ("WBP4", "YBP4", "Intermodal"),
+    ("WBP5", "YBP5", "Intermodal"),
+    ("WBP6", "YBP6", "Intermodal"),
+    ("WBP7", "YBP7", "Intermodal"),
+    ("WBS3", "YBS3", "Intermodal"),
+    ("WBS4", "YBS4", "Intermodal"),
+    ("WBS5", "YBS5", "Intermodal"),
+    ("PCD3", "WCP3", "Intermodal"),
+    ("PCD4", "WCP4", "Intermodal"),
+    ("PCD5", "WCP5", "Intermodal"),
+    ("PCD7", "WCP7", "Intermodal"),
+    ("SCD3", "WCS3", "Intermodal"),
+    ("SCD4", "WCS4", "Intermodal"),
+    ("SCD5", "WCS5", "Intermodal"),
+    ("SCD6", "WCS6", "Intermodal"),
+    ("SCD7", "WCS7", "Intermodal"),
+    ("PDC3", "WDP3", "Intermodal"),
+    ("PDC4", "WDP4", "Intermodal"),
+    ("PDC5", "WDP5", "Intermodal"),
+    ("PDC7", "WDP7", "Intermodal"),
+    ("SDC3", "WDS3", "Intermodal"),
+    ("SDC4", "WDS4", "Intermodal"),
+    ("SDC5", "WDS5", "Intermodal"),
+    ("SDC7", "WDS7", "Intermodal"),
+    ("PDL3", "WEP3", "Intermodal"),
+    ("PDL4", "WEP4", "Intermodal"),
+    ("PDL5", "WEP5", "Intermodal"),
+    ("PDL6", "WEP6", "Intermodal"),
+    ("PDL7", "WEP7", "Intermodal"),
+    ("SDL3", "WES3", "Intermodal"),
+    ("SDL4", "WES4", "Intermodal"),
+    ("SDL5", "WES5", "Intermodal"),
+    ("SDL6", "WES6", "Intermodal"),
+    ("SDL7", "WES7", "Intermodal"),
+    ("PLD3", "WFP3", "Intermodal"),
+    ("PLD4", "WFP4", "Intermodal"),
+    ("PLD5", "WFP5", "Intermodal"),
+    ("PLD6", "WFP6", "Intermodal"),
+    ("PLD7", "WFP7", "Intermodal"),
+    ("SLD3", "WFS3", "Intermodal"),
+    ("SLD4", "WFS4", "Intermodal"),
+    ("SLD6", "WFS6", "Intermodal"),
+    ("SHZ3", "WGS3", "Intermodal"),
+    ("SHZ4", "WGS4", "Intermodal"),
+    ("SHZ6", "WGS6", "Intermodal")
+]
+
+# Create a DataFrame with the given schema and data
+df_service_codes = spark.createDataFrame(data, schema=schema)
+
+# Write the DataFrame to Hive – this will create the tms_service_codes_map table with the data
+df_service_codes.write.mode("overwrite").saveAsTable("tms_service_codes_map")
+
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.window import Window
+
+# Assuming SparkSession is already available
+spark = SparkSession.builder.getOrCreate()
+
+# -------------------------------
+# Step 14: Create truckload_intermodal_2
+# -------------------------------
+# truckload_intermodal_2 is built by left joining truckload_intermodal_1
+# with tms_service_codes_map on serv_tms_code = code_a.
+df_truck_intermodal_1 = spark.table("truckload_intermodal_1")
+df_tms_service_codes_map = spark.table("tms_service_codes_map")
+
+df_truck_intermodal_2 = (
+    df_truck_intermodal_1.alias("ti1")
+    .join(
+        df_tms_service_codes_map.alias("tms"),
+        F.col("ti1.serv_tms_code") == F.col("tms.code_a"),
+        "left"
+    )
+    .select(
+        F.col("ti1.shpmt_num"),
+        F.col("ti1.serv_tms_code"),
+        F.col("ti1.dest_zone_go_name"),
+        F.col("ti1.dest_loc_code"),
+        F.col("ti1.origin_zone_name"),
+        F.col("tms.code_a"),
+        F.col("tms.truckload_intermodal").alias("truckload_intermodal_a")
+    )
+)
+df_truck_intermodal_2.createOrReplaceTempView("truckload_intermodal_2")
+
+# -------------------------------
+# Step 15: Create truckload_intermodal_3
+# -------------------------------
+# Here we perform another left join on truckload_intermodal_2 by joining
+# on serv_tms_code = code_g from tms_service_codes_map.
+df_truck_intermodal_3 = (
+    df_truck_intermodal_2.alias("ti2")
+    .join(
+        df_tms_service_codes_map.alias("tms"),
+        F.col("ti2.serv_tms_code") == F.col("tms.code_g"),
+        "left"
+    )
+    .select(
+        F.col("ti2.shpmt_num"),
+        F.col("ti2.serv_tms_code"),
+        F.col("ti2.dest_zone_go_name"),
+        F.col("ti2.dest_loc_code"),
+        F.col("ti2.origin_zone_name"),
+        F.col("ti2.truckload_intermodal_a"),
+        F.col("tms.code_g"),
+        F.col("tms.truckload_intermodal").alias("truckload_intermodal_g")
+    )
+)
+df_truck_intermodal_3.createOrReplaceTempView("truckload_intermodal_3")
+
+# -------------------------------
+# Step 16: Create truckload_intermodal_final
+# -------------------------------
+# Use conditional logic to decide which service code description to use.
+# If truckload_intermodal_a is not null, use it; else if truckload_intermodal_g is not null, use that;
+# otherwise, use 'Service code not found'.
+df_truckload_intermodal_final = (
+    df_truck_intermodal_3.select(
+        "shpmt_num",
+        "serv_tms_code",
+        "dest_zone_go_name",
+        "dest_loc_code",
+        "origin_zone_name",
+        F.when(F.col("truckload_intermodal_a").isNotNull(), F.col("truckload_intermodal_a"))
+         .when(F.col("truckload_intermodal_g").isNotNull(), F.col("truckload_intermodal_g"))
+         .otherwise("Service code not found")
+         .alias("truckload_vs_intermodal")
+    )
+)
+df_truckload_intermodal_final.createOrReplaceTempView("truckload_intermodal_final")
+
+# -------------------------------
+# Step 17: Create vendor_masterdata_carrier_description view
+# -------------------------------
+# Load your vendor master data (assumed in database variable dbMasterDataG11)
+dbMasterDataG11 = "your_master_data_db"  # Update with your actual database name
+
+df_lfa1 = spark.table(f"{dbMasterDataG11}.lfa1")
+df_vendor_masterdata_carrier_description = df_lfa1.select(
+    F.col("lifnr").alias("carrier_id"),
+    F.col("name1").alias("carrier_desc")
+)
+df_vendor_masterdata_carrier_description.createOrReplaceTempView("vendor_masterdata_carrier_description")
+
+# -------------------------------
+# Step 18: Create tac_first_tender_carrier_id view
+# -------------------------------
+# From tender_acceptance_na_merged_star, we choose the row per load_id with
+# the highest tender_first_carr_ind value (using row_number partitioned by load_id).
+dbTransVsbltBw = "your_trans_vsblt_bw_db"  # Update with your actual database name
+
+df_tender_acc = spark.table(f"{dbTransVsbltBw}.tender_acceptance_na_merged_star")
+window_spec = Window.partitionBy("load_id").orderBy(F.desc("tender_first_carr_ind"))
+
+df_tac_first = (
+    df_tender_acc
+    .withColumn("row_num", F.row_number().over(window_spec))
+    .filter(F.col("row_num") == 1)
+    .select("load_id", "frwrd_agent_id")
+)
+df_tac_first.createOrReplaceTempView("tac_first_tender_carrier_id")
+
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.window import Window
+
+# Initialize SparkSession if not already done
+spark = SparkSession.builder.getOrCreate()
+
+########################################################################
+# Step 19: Create load_id_carrier_description view
+########################################################################
+
+# Read the temporary views produced in previous steps.
+df_tac_first = spark.table("tac_first_tender_carrier_id")  # Step 18 view
+df_vendor = spark.table("vendor_masterdata_carrier_description")  # Step 17 view
+
+# Perform a left outer join between tac_first_tender_carrier_id and vendor_masterdata_carrier_description
+df_load_id_carrier_description = (
+    df_tac_first.alias("tac")
+    .join(
+        df_vendor.alias("vmd"),
+        F.col("tac.frwrd_agent_id") == F.col("vmd.carrier_id"),
+        "left_outer"
+    )
+    .select(
+        F.col("tac.load_id"),
+        F.col("vmd.carrier_desc")
+    )
+)
+# Register the result as a temporary view.
+df_load_id_carrier_description.createOrReplaceTempView("load_id_carrier_description")
+
+########################################################################
+# Workaround for getting Distance fields (Step: shpmt_num_dstnc_qty_aotsotcsot)
+########################################################################
+
+# Read the on-time arrival table from dbTransVsbltBw.
+# (Make sure the dbTransVsbltBw variable is set to your appropriate database name.)
+df_on_time = spark.table(f"{dbTransVsbltBw}.on_time_arriv_shpmt_custshpmt_na_merged_star") \
+    .select("shpmt_num", "dstnc_qty") \
+    .distinct()
+
+# Read the distance history table (tfs_distance_hist_lkp) and transform its columns.
+df_distance = spark.table("tfs_distance_hist_lkp").select(
+    F.concat(F.lit("0"), F.col("load_id").cast("string")).alias("shpmt_num"),
+    F.col("distance_qty").cast("decimal(38,4)").alias("dstnc_qty")
+)
+
+# Union the two DataFrames and select distinct rows.
+df_shpmt_num_dstnc_qty = df_on_time.union(df_distance).distinct()
+
+# Register as a temporary view.
+df_shpmt_num_dstnc_qty.createOrReplaceTempView("shpmt_num_dstnc_qty_aotsotcsot")
+
+########################################################################
+# Step 20: Create joined_id_tfs_cad_tac table
+########################################################################
+
+# Read all required views
+df_distinct_shpmt_id_tfs = spark.table("distinct_shpmt_id_tfs")
+df_distinct_load_id_cad = spark.table("distinct_load_id_cad")
+df_distinct_load_id_frt_auction_ind_tac = spark.table("distinct_load_id_frt_auction_ind_tac")
+df_distinct_shpmt_id_count_tdc_val_tfs = spark.table("distinct_shpmt_id_count_tdc_val_tfs")
+df_load_id_orign_zone_frt_type_name_tac = spark.table("load_id_orign_zone_frt_type_name_tac")
+df_truckload_intermodal_final = spark.table("truckload_intermodal_final")
+df_load_id_carrier_description = spark.table("load_id_carrier_description")
+df_shpmt_num_dstnc_qty = spark.table("shpmt_num_dstnc_qty_aotsotcsot")
+
+# Start with distinct_shpmt_id_tfs and chain left joins according to the join keys.
+df_joined = (
+    df_distinct_shpmt_id_tfs.alias("tfs")
+    # Join with distinct_load_id_cad on shpmt_id = load_id_cad
+    .join(df_distinct_load_id_cad.alias("cad"),
+          F.col("tfs.shpmt_id") == F.col("cad.load_id_cad"),
+          "left_outer")
+    # Join with distinct_load_id_frt_auction_ind_tac on shpmt_id = load_id_tac2
+    .join(df_distinct_load_id_frt_auction_ind_tac.alias("tac"),
+          F.col("tfs.shpmt_id") == F.col("tac.load_id_tac2"),
+          "left_outer")
+    # Join with distinct_shpmt_id_count_tdc_val_tfs on shpmt_id = shpmt_id_tdc
+    .join(df_distinct_shpmt_id_count_tdc_val_tfs.alias("tdc"),
+          F.col("tfs.shpmt_id") == F.col("tdc.shpmt_id_tdc"),
+          "left_outer")
+    # Join with load_id_orign_zone_frt_type_name_tac on shpmt_id = load_id
+    .join(df_load_id_orign_zone_frt_type_name_tac.alias("orign"),
+          F.col("tfs.shpmt_id") == F.col("orign.load_id"),
+          "left_outer")
+    # Join with truckload_intermodal_final on shpmt_id = shpmt_num
+    .join(df_truckload_intermodal_final.alias("truck"),
+          F.col("tfs.shpmt_id") == F.col("truck.shpmt_num"),
+          "left_outer")
+    # Join with load_id_carrier_description on shpmt_id = load_id
+    .join(df_load_id_carrier_description.alias("carrier"),
+          F.col("tfs.shpmt_id") == F.col("carrier.load_id"),
+          "left_outer")
+    # Join with the distance table on shpmt_id = shpmt_num
+    .join(df_shpmt_num_dstnc_qty.alias("distance"),
+          F.col("tfs.shpmt_id") == F.col("distance.shpmt_num"),
+          "left_outer")
+)
+
+# Select the required columns.
+df_final = df_joined.select(
+    F.col("tfs.shpmt_id"),
+    F.col("cad.*"),
+    F.col("tac.frt_auction_ind"),
+    F.col("tdc.tdc_val_code_count"),
+    F.col("orign.orign_zone_code"),
+    F.col("orign.frt_type_name"),
+    F.col("truck.truckload_vs_intermodal"),
+    F.col("truck.serv_tms_code"),
+    F.col("truck.dest_zone_go_name"),
+    F.col("truck.dest_loc_code"),
+    F.col("truck.origin_zone_name"),
+    F.col("carrier.carrier_desc"),
+    F.col("distance.dstnc_qty")
+)
+
+# Write the final joined DataFrame as a Hive table.
+# (This mimics the CREATE TABLE ... AS SELECT functionality.)
+df_final.write.mode("overwrite").saveAsTable("joined_id_tfs_cad_tac")
+
+########################################################################
+# Step 21: Create month_exchng_rate_rds view
+########################################################################
+
+# Set your RDS database variable appropriately.
+dbRds = "your_rds_database"  # update as needed
+
+# Read the exchange rate fact table.
+df_exchg_rate = spark.table(f"{dbRds}.exchg_rate_fct")
+
+# Filter and transform according to the criteria.
+df_month_exchng_rate = (
+    df_exchg_rate.filter(
+        (F.col("srce_iso_crncy_code") == "CAD") &
+        (F.col("trgt_iso_crncy_code") == "USD") &
+        (F.col("exchg_rate_type_id") == "11") &
+        (F.year("exchg_rate_eff_date") > 2013)
+    )
+    .select(
+        F.date_format(F.col("exchg_rate_eff_date"), "y-MM").alias("year_month"),
+        F.col("exchg_rate")
+    )
+)
+
+# Register as a temporary view.
+df_month_exchng_rate.createOrReplaceTempView("month_exchng_rate_rds")
+
+from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField, StringType
+
+# Initialize your SparkSession
+spark = SparkSession.builder.getOrCreate()
+
+from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField, StringType
+
+# Initialize SparkSession (with Hive support enabled)
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+
+# Step 22: Drop the existing table if it exists.
+spark.sql("DROP TABLE IF EXISTS tms_charge_id")
+
+# Define the schema matching the table specification.
+schema = StructType([
+    StructField("fcc", StringType(), True),
+    StructField("fcc_desc", StringType(), True),
+    StructField("freight_charge_description_2", StringType(), True),
+    StructField("flow_reason", StringType(), True),
+    StructField("accessorial_reason", StringType(), True)
+])
+
+# Step 23: Build the complete data as a list of tuples.
+data = [
+    # First block
+    ("0000", "1 of VAT/Offshore/CAD currency exchange/inland transportation", "Base Price - Incorrect Rate", "Base Price", "Special Needs"),
+    ("150",  "Canadian Currency Exchange", " ", " ", "Export"),
+    ("450",  "Inland Transportation", "", "", "Export"),
+    ("510",  "Offshore-Alaska/Hawaii", " ", " ", "Export"),
+    ("750",  "VAT - VALUE ADDED TAX", " ", " ", "Opt Only"),
+    ("ADET", "Authorizatrion to destroy.", " ", " ", "Unproductive"),
+    ("ADH",  "ADH", " ", " ", "Export"),
+    ("ADR",  "Temperature Protect", " ", " ", "Special Needs"),
+    ("ADRA", "Dangerous for Air", " ", " ", "Special Needs"),
+    ("BB1",  "Atlanta BB1 X Dock", " ", " ", "Opt Only"),
+    ("BB2",  "CAROL STRM BB2 X Dock", " ", " ", "Opt Only"),
+    ("BCF",  "Border Crossing Fee", " ", " ", "Export"),
+    ("BOB",  "Bobtail", "Bobtail charge ", "Surge", "Unproductive"),
+    ("BROK", "Brokerage fee or duty fee", " ", " ", "Export"),
+    ("BSC",  "BUNKER SURCHARGE", "Bunker Surcharge", "Base Price", "Export"),
+    ("BTCH", "Bobtail charge on promotaionl trailers", " ", " ", "Event"),
+    ("BYD",  "Beyond Charge", "Beyond Charge", "Base Price", "Export"),
+    ("CAA",  "Cancelled Expedite", " ", " ", "Unproductive"),
+    ("CASE", "Case Based Charge", " ", " ", "Opt Only"),
+    ("CFC",  "Customs Fee", " ", " ", "Export"),
+    ("CLN",  "CONTAINER CLEANING", " ", " ", "Export"),
+    ("COD",  "COD", " ", " ", "Special Needs"),
+    ("COF",  "Ocean Freight", "Ocean Freight", "Base Price", "Export"),
+    ("COL",  "Fee for Collecting COD Charge", "Collect on Delivery", "Other", "Special Needs"),
+    ("CPU",  "CPU", " ", " ", "Opt Only"),
+    ("CPU5", "CPU 5 day", " ", " ", "Opt Only"),
+    ("CPU7", "CPU 7 days", " ", " ", "Opt Only"),
+    ("CPUC", "CPU (Condition)", "CPU (Condition)", "Base Price", "Opt Only"),
+    ("CPUI", "CPUIM", " ", " ", "Opt Only"),
+    ("CPUT", "CPUT", " ", " ", "Opt Only"),
+    
+    # Second block
+    ("CSCT", "Location Needs Customer Specific Carrier Tariff", " ", " ", "Opt Only"),
+    ("CSE",  "CASE", " ", " ", "Opt Only"),
+    ("CUA",  "Currency Adjustments", " ", " ", "Export"),
+    ("CUD",  "Currency Adjustment Debit", "Currency Adjustment Debit - Should Not Be Used.", "Other", "Export"),
+    ("CUF",  "Currency Adjustment Credit", " ", " ", "Export"),
+    ("DAM",  "AUTHORIZATION TO DESTROY", "Authorization to Destroy", "Other", "Unproductive"),
+    ("DBAL", "Balance Due.", " ", " ", "Special Needs"),
+    ("DEL",  "Delivery Charge", "Dual Driver", "Other", "Special Needs"),
+    ("DEM",  "Demurrage", "Demurrage", "Origin Detention", "Detention"),
+    ("DEW",  "Detention without Power Unit", "Detention without Power", "Destination Detention", "Detention"),
+    ("DG",   "Dangerous Goods", "Dangerous Goods not paid on Initial proposal", "Base Price", "Special Needs"),
+    ("DGC",  "Dangerous Goods (Condition)", "TMS Code - Should Not Be Used", "Other", "Opt Only"),
+    ("DGS",  "DANGEROUS GOODS", "Dangerous Goods not paid on Initial proposal - HAZMAT", "Base Price", "Special Needs"),
+    ("DIST", "Distance Based Charge", " ", " ", "Line Haul"),
+    ("DLTL", "DISCOUNTS ON LTL", "Discounts on LTL", "Base Price", "Line Haul"),
+    ("DPD",  "PRE-CARRIAGE CHARGE", "PRE-CARRIAGE CHARGE (Drayage)", "Base Price", "Export"),
+    ("DPE",  "POST-CARRIAGE CHARGE", " ", " ", "Export"),
+    ("DPU",  "Detention", "Detention with Power", "Destination Detention", "Detention"),
+    ("DROP", "DROP", " ", " ", "Special Needs"),
+    ("DSCS", "Discount - Shipment Level", " ", " ", "Line Haul"),
+    ("DSD",  "Direct Store Delivery", " ", " ", "Event"),
+    ("DSDC", "Direct Store Delivery (Condition)", "Direct Store Delivery (Condition)", "Base Price", "Event"),
+    ("DSPL", "DS Parcel Test Condition - Longest Side", " ", " ", "Line Haul"),
+    ("DSPS", "DS Parcel Test Condition - Shortest Side", " ", " ", "Line Haul"),
+    ("DSPW", "DS Parcel Test Condition - Weight", " ", " ", "Line Haul"),
+    ("DSSL", "DS Parcel Test Condition - Second Longest Side", " ", " ", "Line Haul"),
+    ("DSSS", "DS Parcel Test Condition - Size", " ", " ", "Line Haul"),
+    ("DST",  "distance based charge", "Used for balance due on non LTL loads", "Base Price", "Line Haul"),
+    ("DTC",  "DESTINATION CHARGE", " ", " ", "Special Needs"),
+    ("DTL",  "Detention Loading", "Detention Loading Minutes", "Origin Detention", "Detention"),
+    ("DTU",  "Driver Detention Unloading (Dwell Time)", "Driver wait time at delivery", "Destination Detention", "Detention"),
+    ("DTV",  "Trailer Detention", "Trailer Detention Interplant Loads only", "Destination Detention", "Detention"),
+    ("DULD", "Driver Detention Unloading", " ", " ", "Detention"),
+    ("DWEL", "Dwell Time", " ", " ", "Detention"),
+    
+    # Third block
+    ("EBD",  "Exhibition Delivery", "Convention Exhibition Delivery", "Other", "Special Needs"),
+    ("EBP",  "Exhibition Pickup Charge", " ", " ", "Special Needs"),
+    ("EMT",  "SITE CAUSED TONU", " ", " ", "Unproductive"),
+    ("EVEN", "Events", "Event", "Base Price", "Event"),
+    ("EXC",  "Exclusive Use", "Exclusive Use", "Base Price", "Special Needs"),
+    ("EXM",  "Empty miles/Repositioning/Surge Charge", "Out of route miles", "Surge", "Line Haul"),
+    ("EXP",  "EXPEDITE", "Expedite", "Expedite", "Special Needs"),
+    ("FA_A", "Freight Auction Adjustment", "Freight Auction Rate Adjustment", "Surge", "Line Haul"),
+    ("FCHG", "fuel surcharge LTL", " ", " ", "Fuel"),
+    ("FFLT", "Fuel Flat Charge", "Fuel Flat Charge for Domestic Ocean", "Base Price", "Fuel"),
+    ("FLAT", "Flat Charge", " ", " ", "Line Haul"),
+    ("FLT",  "FLAT CHARGE", "Flat Charge Mexico", "Base Price", "Line Haul"),
+    ("FLTL", "LTL FUEL SURCHARGE", "LTL Fuel Flat Charge Domestic Ocean", "Base Price", "Fuel"),
+    ("FSUR", "BTF Fuel Surcharge", "BTF Fuel surcharge for TL and IM", "Base Price", "Fuel"),
+    ("FTP",  "Fleet Tiered Pricing", "Carriers manage above award + surge", "Surge", "Line Haul"),
+    ("FU_S", "FUEL SURCHARGE", "Pegged Fuel for IM", "Base Price", "Fuel"),
+    ("FULD", "Full Unload/Sort", " ", " ", "Labor"),
+    ("FUSU", "Fuel Surcharge", " ", " ", "Fuel"),
+    ("GD",   "GUARANTEED DELIVERY", " ", " ", "Special Needs"),
+    ("GLD",  "Special Customer Event", "Initiative/Surge Extra Costs", "Surge", "Event"),
+    ("GST",  "Goods and Services Tax Charge", " ", " ", "Opt Only"),
+    ("HAZ",  "HAZARDOUS SURCHARGE", "HAZ MAT", "Base Price", "Special Needs"),
+    ("HEAV", "Heavy Equipment", " ", " ", "Opt Only"),
+    
+    # Fourth block
+    ("HLPR", "Helper/Lumper", " ", " ", "Labor"),
+    ("HOT",  "HOT", " ", " ", "Opt Only"),
+    ("HOTC", "HOT (Condition)", "Hot Condition", "Base Price", "Opt Only"),
+    ("HUR",  "Hurricane Orders", " ", " ", "Opt Only"),
+    ("HURC", "HURRICANE (Condition)", " ", " ", "Opt Only"),
+    ("IDL",  "Inside Pick Up and Delivery", "Inside Delivery", "Base Price", "Special Needs"),
+    ("IDLR", "Inside Delivery", " ", " ", "Special Needs"),
+    ("IIA",  "Balance Due", " ", " ", "Special Needs"),
+    ("IPDR", "Interplant DRP 2nd Run", " ", " ", "Opt Only"),
+    ("LAB",  "Helper/Lumper Charge", "Extra Labor (Helper Service)", "Helper", "Labor"),
+    ("LAY",  "Layover", "Layover Charge", "Other", "Detention"),
+    ("LFLT", "Linehaul Flat Charge", "Line haul flat charge", "Base Price", "Export"),
+    ("LFT",  "Liftgate Charges", "Lift Gate (Truck) or Forklift Service", "Other", "Labor"),
+    ("LIN",  "Linear Foot", " ", " ", "Special Needs"),
+    ("LOVR", "Layover", " ", " ", "Detention"),
+    ("LTL",  "LTL CHARGE", " ", " ", "Special Needs"),
+    ("LTL_", "LTL Tariff", " ", " ", "Special Needs"),
+    ("MEA",  "Layover at the Ship Site", "", "Other", "Detention"),
+    ("MOO",  "Milk Runs for Canada", "Canada Milk Runs", "Base Price", "Special Needs"),
+    ("MSG",  "MISCELLANEOUS CHARGE", "Miscellaneous charge", "Other", "Unproductive"),
+    ("NA",   "Misc Accessorial", " ", " ", "Unproductive"),
+    ("NCBI", "NO CB TRANSPORTATION", " ", " ", "Opt Only"),
+    ("NCBN", "NO CB TRANSPORTATION", " ", " ", "Opt Only"),
+    ("NKNI", "NO KNIGHT TRANSPORTATION", " ", " ", "Opt Only"),
+    ("NLLW", "NO LIPSEY LOGISTICS", " ", " ", "Opt Only"),
+    ("NMTR", "NO METROPOLITAN TRUCKING", " ", " ", "Opt Only"),
+    ("NO A", "NO AIR", " ", " ", "Opt Only"),
+    ("NOAI", "Not Fit for Air Transport", " ", " ", "Opt Only"),
+    ("NOFR", "No Freight", " ", " ", "Opt Only"),
+    ("NRBI", "NO CH ROBINSON", " ", " ", "Opt Only"),
+    ("NYD",  "New York Delivery Charge", "New York Delivery Charge", "Base Price", "Special Needs"),
+    ("ODLR", "Off Hours Delivery", " ", " ", "Special Needs"),
+    ("OORM", "Empty miles/ Repositioning/Surge", " ", " ", "Unproductive"),
+    ("ORM",  "OUT OF ROUTE MILES", "Out of route miles", "Other", "Unproductive"),
+    ("OVR",  "Overweight Return", "Overweight Return", "Other", "Unproductive"),
+    ("PALL", "PALL", " ", " ", "Opt Only"),
+    
+    # Fifth block
+    ("PCH",  "Temperature Protective Service", "Temperature Protect Surcharge", "Base Price", "Special Needs"),
+    ("PDT",  "Promotional Drop Trailer", " ", " ", "Special Needs"),
+    ("PMS",  "Same Day Service", " ", " ", "Special Needs"),
+    ("PMT",  "After Hours Pick-Up and/or Delivery", "After Hours Pick-Up and/or Delivery", "Other", "Special Needs"),
+    ("PPC",  "Pre Purchase Capacity", " ", " ", "Unproductive"),
+    ("PPCH", "Pre-purchase ( Unused Pre Purchase )", " ", " ", "Unproductive"),
+    ("PPU",  "Pre Purchase Capacity", "Unused PrePurchased Capacity", "Other", "Unproductive"),
+    ("PRCH", "Puerto Rico Charge", " ", " ", "Special Needs"),
+    ("PRDT", "Promotional Drop Trailer", " ", " ", "Event"),
+    ("PSC-", "PSC-Cold", " ", " ", "Special Needs"),
+    ("RCC",  "Reconsignment Charge", "Reconsignment", "Other", "Unproductive"),
+    ("RCCH", "Reconsignment Charge", " ", " ", "Unproductive"),
+    ("RCL",  "Redelivery Charge", "Redelivery", "Other", "Unproductive"),
+    ("RDLR", "Redelivery", " ", " ", "Unproductive"),
+    ("REP",  "Residential Pick-Up", " ", " ", "Special Needs"),
+    ("RES",  "Residential Delivery", "Residential Delivery", "Base Price", "Special Needs"),
+    ("RESI", "Residential Charge", " ", " ", "Special Needs"),
+    ("RET",  "Refused and Return", "Refusal & Return", "Returns/Refusals", "Unproductive"),
+    ("RNR",  "Refused and Return", " ", " ", "Unproductive"),
+    ("RRC",  "Reconsignment/Diversion of Freight", " ", " ", "Unproductive"),
+    ("RRN",  "Rental of equipment", " ", " ", "Event"),
+    ("RTC",  "Spot Rate", "Spot Rate", "Returns/Refusals", "Unproductive"),
+    ("SAT",  "Saturday Delivery", "Saturday Delivery", "Other", "Special Needs"),
+    ("SCS",  "Schedule C Shortfall", "Schedule C Shortfall", "Base Price", "Line Haul"),
+    ("SEC",  "NAT GAS PLANNED ACCESSORIAL", "Special Equipment - Nat Gas Planned Accessorial", "Base Price", "Special Needs"),
+    ("SEG",  "Sorting and Segregating", "Segregating (Sorting)", "Other", "Labor"),
+    ("SER",  "SECURITY CHARGE", " ", " ", "Export"),
+    ("SOC",  "STOP OFF CHARGE CONDITION", "Stop Off Charge", "Base Price", "Special Needs"),
+    ("SOCH", "Stop Off Charge", " ", " ", "Special Needs"),
+    ("SPA",  "Special Allowance", "Special Allowance", "Surge", "Special Needs"),
+    ("SPOT", "SPOT RATE", " ", " ", "Line Haul"),
+    ("SRG",  "Promotional Drop Trailer", "Promotional Drop Trailer", "Other", "Event"),
+    ("STOP", "STOP CHARGE CONDITION", " ", " ", "Special Needs"),
+    ("STOR", "Storage", " ", " ", "Unproductive"),
+    ("STR",  "Storage", "Storage In Transit", "Other", "Unproductive"),
+    ("SUF",  "Sufferance Warehouse Charge", " ", " ", "Export"),
+    ("SUR",  "SURCHARGE- Other than fuel-Scanning Charges", "Surcharge - NonFuel Scanning Charges", "Base Price", "Export"),
+    
+    # Sixth block
+    ("TAY",  "GOVERNMENTAL TAX", "Government Tax", "Base Price", "Export"),
+    ("TDRV", "Team Driver Charge", "Team Driver", "Base Price", "Special Needs"),
+    ("TEMP", "Temperature Protect Charge", "Protective Service (Heat or Freezing)", "Base Price", "Special Needs"),
+    ("TER",  "TERMINAL CHARGE", "Terminal Charge", "Base Price", "Export"),
+    ("TEST", "TEST", " ", " ", "Opt Only"),
+    ("TPS",  "Management Fee", " ", " ", "Opt Only"),
+    ("TSC",  "Tiered Surge Cost", "Tiered Surcharge", "Base Price", "Line Haul"),
+    ("UND",  "PARTIAL UNLOAD", "Partial Unload", "Other", "Labor"),
+    ("UNL",  "Full Unload/Sort Charge", "Full Unload", "Other", "Labor"),
+    ("VFN",  "Vehicle Furnished Not Used/Truck Ordered Not Used", "Vehicle Furnished Not Used/Truck Ordered Not Used", "Other", "Unproductive"),
+    ("VOLM", "Volume", " ", " ", "Special Needs"),
+    ("WAIT", "Wait Time - Total Wait Time", " ", " ", "Detention"),
+    ("WFG",  "Wharfage", "Wharfage", "Base Price", "Export"),
+    ("WGHT", "WEIGHT BASED LTL CHARGE", "Unknown", "Other", "Special Needs"),
+    ("WGTC", "Weight - Container Level", " ", " ", "Export"),
+    ("WGTS", "Weight - Shipment Level", " ", " ", "Special Needs"),
+    ("WHC",  "Warehouse Charge", "Warehouse Charge", "Other", "Special Needs"),
+    ("WRC",  "Weight and Inspection Charge", "Weight and Inspection Charge", "Other", "Unproductive"),
+    ("WTG",  "BORDER DELAY", "Border Delay", "Other", "Export"),
+    ("TOP",  "Take or Pay", "Take or Pay", "Quarter End", "Quarter End"),
+    ("TAD",  "Green Tax Code", "Green Tax Code", "Tax Code", "Tax Code"),
+    ("PDY",  "Remote Area Code", "Remote Area Code", "Area Code", "Area Code"),
+    ("CVYI", "Dynamic Pricing", "Dynamic Pricing", " ", "Linehaul"),
+    ("HJBT", "Dynamic Pricing", "Dynamic Pricing", " ", "Linehaul"),
+    ("KNIG", "Dynamic Pricing", "Dynamic Pricing", " ", "Linehaul"),
+    ("L2D",  "Live to Drop Flip", "Live to Drop Flip", " ", "Linehaul"),
+    ("SCNN", "Dynamic Pricing", "Dynamic Pricing", " ", "Linehaul"),
+    ("UFLB", "Dynamic Pricing", "Dynamic Pricing", " ", "Linehaul"),
+    ("USXI", "Dynamic Pricing", "Dynamic Pricing", " ", "Linehaul"),
+    ("PGLI", "Dynamic Pricing", "Dynamic Pricing", " ", "Linehaul")
+]
+
+# Create a DataFrame from the data list, using the defined schema.
+df_tms_charge_id = spark.createDataFrame(data, schema=schema)
+
+# Write the DataFrame to Hive, thereby creating the tms_charge_id table.
+df_tms_charge_id.write.mode("overwrite").saveAsTable("tms_charge_id")
+
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.window import Window
+
+# Initialize SparkSession (with Hive support if needed)
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+
+# Set your database variable (update as required)
+dbTransVsbltBw = "your_trans_db"
+
+##########################################
+# Step 1: Create tfs_distinct_matl_doc_num
+##########################################
+# Read the freight stats table and select distinct material document numbers
+freight_stats_df = spark.table(f"{dbTransVsbltBw}.freight_stats_na_merged_star")
+distinct_matl_doc_num_df = freight_stats_df.select("matl_doc_num").distinct()
+
+# Create temporary view
+distinct_matl_doc_num_df.createOrReplaceTempView("tfs_distinct_matl_doc_num")
+
+##########################################
+# Step 2: Create tfs_distinct_tdc_val
+##########################################
+# Select distinct TDC value codes
+distinct_tdc_val_df = freight_stats_df.select("tdc_val_code").distinct()
+
+# Create temporary view
+distinct_tdc_val_df.createOrReplaceTempView("tfs_distinct_tdc_val")
+
+##########################################
+# Step 3: Prepare lookup (bop_by_material)
+##########################################
+# Read the product category lookup table and rename/transform columns:
+#   - decomposed_material: material_doc_num
+#   - bu: business_unit_name
+#   - is_bu_pgp: if business_unit_name contains 'PGP', then 1, else 0
+#   - product_category: prod_categ_name
+#   - tdc_val: tdcval_id
+prod_categ_df = spark.table("prod_categ_lkp").select(
+    F.col("material_doc_num").alias("decomposed_material"),
+    F.col("business_unit_name").alias("bu"),
+    F.when(F.col("business_unit_name").like("%PGP%"), F.lit(1)).otherwise(F.lit(0)).alias("is_bu_pgp"),
+    F.col("prod_categ_name").alias("product_category"),
+    F.col("tdcval_id").alias("tdc_val")
+).distinct()
+
+# Apply a window function partitioned by decomposed_material, ordering by is_bu_pgp ASC
+window_by_decomposed = Window.partitionBy("decomposed_material").orderBy(F.col("is_bu_pgp").asc())
+
+prod_categ_with_rank_material = prod_categ_df.withColumn("ranked_no", F.row_number().over(window_by_decomposed))
+bop_by_material_df = prod_categ_with_rank_material.filter(F.col("ranked_no") == 1).drop("ranked_no")
+
+# Register the lookup as a temporary view
+bop_by_material_df.createOrReplaceTempView("bop_by_material")
+
+##########################################
+# Step 4: Prepare lookup (bop_by_tdc)
+##########################################
+# Now build the lookup keyed by tdc_val. Partition by tdc_val and order by is_bu_pgp ASC.
+window_by_tdc = Window.partitionBy("tdc_val").orderBy(F.col("is_bu_pgp").asc())
+prod_categ_with_rank_tdc = prod_categ_df.withColumn("ranked_no", F.row_number().over(window_by_tdc))
+bop_by_tdc_df = prod_categ_with_rank_tdc.filter(F.col("ranked_no") == 1).drop("ranked_no")
+
+# Register the lookup as a temporary view
+bop_by_tdc_df.createOrReplaceTempView("bop_by_tdc")
+
+##########################################
+# Step 5: Join material number lookup
+##########################################
+# Read the temporary view for distinct material document numbers
+tfs_distinct_matl_doc_num = spark.table("tfs_distinct_matl_doc_num")
+
+# Join with bop_by_material: match by SUBSTR(matl_doc_num, 3) equaling decomposed_material.
+# Note: In PySpark, F.expr("substring(col, 3)") extracts from the 3rd character to the end.
+matl_doc_num_and_bop_df = tfs_distinct_matl_doc_num.alias("tfs").join(
+    bop_by_material_df.alias("bop"),
+    F.expr("substring(tfs.matl_doc_num, 3)") == F.col("bop.decomposed_material"),
+    "left_outer"
+).select(
+    F.col("tfs.matl_doc_num"),
+    F.col("bop.bu").alias("bu_material"),
+    F.col("bop.product_category").alias("product_category_material")
+)
+
+# Create temporary view for the join result
+matl_doc_num_and_bop_df.createOrReplaceTempView("matl_doc_num_and_bop")
+
+##########################################
+# Step 6: Join tdc value lookup
+##########################################
+# Read the temporary view for distinct TDC values
+tfs_distinct_tdc_val = spark.table("tfs_distinct_tdc_val")
+
+# Join with bop_by_tdc on tdc_val_code = tdc_val
+tdc_val_and_bop_df = tfs_distinct_tdc_val.alias("tfs").join(
+    bop_by_tdc_df.alias("bop"),
+    F.col("tfs.tdc_val_code") == F.col("bop.tdc_val"),
+    "left_outer"
+).select(
+    F.col("tfs.tdc_val_code"),
+    F.col("bop.bu").alias("bu_tdc"),
+    F.col("bop.product_category").alias("product_category_tdc")
+)
+
+# Create temporary view for the join result
+tdc_val_and_bop_df.createOrReplaceTempView("tdc_val_and_bop")
+
+##########################################
+# Step 7: Create dest_loc_id_from_tac temporary view
+##########################################
+# Read the tac_technical_name_star table and group by the desired columns.
+# Since the SQL groups by load_id, freight_type_code, ship_to_party_id, we can obtain the distinct combinations.
+tac_df = spark.table("tac_technical_name_star")
+dest_loc_id_from_tac_df = tac_df.select("load_id", "freight_type_code", "ship_to_party_id").distinct()
+
+# Register as a temporary view
+dest_loc_id_from_tac_df.createOrReplaceTempView("dest_loc_id_from_tac")
+
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.functions import expr, col, when, upper, concat_ws, substring, length, instr
+
+# Initialize SparkSession with Hive support
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+
+# Define your database variable for your transactional DB (update accordingly)
+dbTransVsbltBw = "your_trans_db"
+
+# ---------------------------------------------------------------------------
+# 1. LOAD SOURCE & LOOKUP TABLES
+# ---------------------------------------------------------------------------
+
+fs   = spark.table(f"{dbTransVsbltBw}.freight_stats_na_merged_star").alias("fs")
+jt   = spark.table("joined_id_tfs_cad_tac").alias("jt")
+mer  = spark.table("month_exchng_rate_rds").alias("mer")
+tc   = spark.table("tms_charge_id").alias("tc")
+cs   = spark.table("cust_656_postal_codes").alias("cs")
+mb   = spark.table("matl_doc_num_and_bop").alias("mb")
+tb   = spark.table("tdc_val_and_bop").alias("tb")
+sl   = spark.table("shipping_location").alias("sl")
+dl   = spark.table("dest_loc_id_from_tac").alias("temp_tfs")
+
+# ---------------------------------------------------------------------------
+# 2. BUILD THE INTERMEDIATE "joined_table" 
+# ---------------------------------------------------------------------------
+# (This table is built by joining the main freight stats with several lookups.)
+joined_table = fs \
+  .join(jt, fs.shpmt_id == jt.shpmt_id, "left") \
+  .join(mer, expr("concat_ws('-', substring(gr_posting_date,7,4), substring(gr_posting_date,4,2))") == mer.year_month, "left") \
+  .join(tc, when(fs.frt_cost_chrg_code.rlike("0*510"), F.lit("510")).otherwise(fs.frt_cost_chrg_code) == tc.fcc, "left") \
+  .join(cs, fs.ship_to_num == cs.ship_to_num, "left") \
+  .join(mb, fs.matl_doc_num == mb.matl_doc_num, "left") \
+  .join(tb, fs.tdc_val_code == tb.tdc_val_code, "left") \
+  .join(sl, fs.ship_point_code == sl["location id"], "left")
+
+# ---------------------------------------------------------------------------
+# 3. TRANSFORM COLUMNS TO CREATE "first_phase_table"
+# ---------------------------------------------------------------------------
+
+first_phase_table = joined_table.select(
+  fs.shpmt_id.alias("shpmt_id"),
+  
+  # Transform orign_zone_for_tfs_name
+  when((length(fs.orign_zone_for_tfs_name) == 60) & (instr(fs.orign_zone_for_tfs_name, "-") == 56),
+       expr("substring(orign_zone_for_tfs_name, 51, 5)")) \
+    .when((length(fs.orign_zone_for_tfs_name) == 60) & (expr("substring(orign_zone_for_tfs_name, 51, 8)") == "00000000"),
+          expr("substring(orign_zone_for_tfs_name, -2)")) \
+    .when((length(fs.orign_zone_for_tfs_name) == 60) & (expr("substring(orign_zone_for_tfs_name, 51, 7)") == "0000000"),
+          expr("substring(orign_zone_for_tfs_name, -3)")) \
+    .when((length(fs.orign_zone_for_tfs_name) == 60) & (expr("substring(orign_zone_for_tfs_name, 51, 5)") == "00000"),
+          expr("substring(orign_zone_for_tfs_name, -5)")) \
+    .when((length(fs.orign_zone_for_tfs_name) == 60) & (expr("substring(orign_zone_for_tfs_name, 51, 4)") == "0000"),
+          expr("substring(orign_zone_for_tfs_name, -6)")) \
+    .when((length(fs.orign_zone_for_tfs_name) == 60) & (expr("substring(orign_zone_for_tfs_name, 51, 3)") == "000"),
+          concat_ws("", expr("substring(orign_zone_for_tfs_name, 54, 3)"), expr("substring(orign_zone_for_tfs_name, 58, 3)"))) \
+    .when(fs.orign_zone_for_tfs_name.isNull(), col("sl.`corporate id 2`")) \
+    .otherwise(fs.orign_zone_for_tfs_name).alias("orign_zone_for_tfs_name"),
+
+  fs.cntry_from_code.alias("cntry_from_code"),
+  fs.chrg_level_for_tms_intfc_name.alias("chrg_level_for_tms_intfc_name"),
+  fs.chrg_kind_for_tms_intfc_name.alias("chrg_kind_for_tms_intfc_name"),
+  fs.reasn_code_tms_intfc.alias("reasn_code_tms_intfc"),
+  fs.su_per_shpmt_qty.alias("su_per_shpmt_qty"),
+  fs.gl_acct_num.alias("gl_acct_num"),
+  fs.chart_acct_num.alias("chart_acct_num"),
+  fs.steps_num.alias("steps_num"),
+  fs.company_code.alias("company_code"),
+  fs.tdc_val_desc.alias("tdc_val_desc"),
+  fs.bill_frt_created_date.alias("bill_frt_created_date"),
+  fs.dlvry_item_count.alias("dlvry_item_count"),
+  fs.carr_country_name.alias("carr_country_name"),
+  fs.carr_country_code.alias("carr_country_code"),
+  fs.carr_postal_code.alias("carr_postal_code"),
+  fs.ship_to_postal_code.alias("ship_to_postal_code"),
+  fs.ship_to_state_code.alias("ship_to_state_code"),
+  fs.ship_to_state_name.alias("ship_to_state_name"),
+  fs.minority_ind_val.alias("minority_ind_val"),
+  
+  # Transform destination zone value (fs.dest_zone_go_val) --> destination_zone
+  when((length(fs.dest_zone_go_val) == 60) & (instr(fs.dest_zone_go_val, "-") == 56),
+       expr("substring(dest_zone_go_val, 51, 5)")) \
+    .when((length(fs.dest_zone_go_val) == 60) & (expr("substring(dest_zone_go_val, 51, 8)") == "00000000"),
+          expr("substring(dest_zone_go_val, -2)")) \
+    .when((length(fs.dest_zone_go_val) == 60) & (expr("substring(dest_zone_go_val, 51, 7)") == "0000000"),
+          expr("substring(dest_zone_go_val, -3)")) \
+    .when((length(fs.dest_zone_go_val) == 60) & (expr("substring(dest_zone_go_val, 51, 5)") == "00000"),
+          expr("substring(dest_zone_go_val, -5)")) \
+    .when((length(fs.dest_zone_go_val) == 60) & (expr("substring(dest_zone_go_val, 51, 4)") == "0000"),
+          expr("substring(dest_zone_go_val, -6)")) \
+    .when((length(fs.dest_zone_go_val) == 60) & (expr("substring(dest_zone_go_val, 51, 3)") == "000"),
+          concat_ws("", expr("substring(dest_zone_go_val, 54, 3)"), expr("substring(dest_zone_go_val, 58, 3)"))) \
+    .when((length(fs.dest_zone_go_val) == 60),
+          expr("substring(dest_zone_go_val, -10)")) \
+    .when((length(fs.dest_zone_go_val) == 7) & (instr(fs.dest_zone_go_val, " ") > 0),
+          concat_ws("", expr("substring(dest_zone_go_val, 1, 3)"), expr("substring(dest_zone_go_val, 5, 3)"))) \
+    .otherwise(fs.dest_zone_go_val).alias("destination_zone"),
+  
+  fs.tfts_load_tmstp.alias("tfts_load_tmstp"),
+  fs.load_from_file.alias("load_from_file"),
+  fs.bd_mod_tmstp.alias("bd_mod_tmstp"),
+  
+  # Transform origin_zone_name similarly:
+  when((length(fs.origin_zone_name) == 60) & (instr(fs.origin_zone_name, "-") == 56),
+       expr("substring(origin_zone_name, 51, 5)")) \
+    .when((length(fs.origin_zone_name) == 60) & (expr("substring(origin_zone_name, 51, 8)") == "00000000"),
+          expr("substring(origin_zone_name, -2)")) \
+    .when((length(fs.origin_zone_name) == 60) & (expr("substring(origin_zone_name, 51, 7)") == "0000000"),
+          expr("substring(origin_zone_name, -3)")) \
+    .when((length(fs.origin_zone_name) == 60) & (expr("substring(origin_zone_name, 51, 5)") == "00000"),
+          expr("substring(origin_zone_name, -5)")) \
+    .when((length(fs.origin_zone_name) == 60) & (expr("substring(origin_zone_name, 51, 4)") == "0000"),
+          expr("substring(origin_zone_name, -6)")) \
+    .when((length(fs.origin_zone_name) == 60) & (expr("substring(origin_zone_name, 51, 3)") == "000"),
+          concat_ws("", expr("substring(origin_zone_name, 54, 3)"), expr("substring(origin_zone_name, 58, 3)"))) \
+    .when((length(fs.origin_zone_name) == 60),
+          expr("substring(origin_zone_name, -10)")) \
+    .when((length(fs.origin_zone_name) == 7) & (instr(fs.origin_zone_name, " ") > 0),
+          concat_ws("", expr("substring(origin_zone_name, 1, 3)"), expr("substring(origin_zone_name, 5, 3)"))) \
+    .otherwise(fs.origin_zone_name).alias("origin_zone_name"),
+  
+  # For dest_loc_code, use the value from joined table jt with transformation:
+  when((length(jt.dest_loc_code) == 60) & (instr(jt.dest_loc_code, "-") == 56),
+       expr("substring(dest_loc_code, 51, 5)")) \
+    .when((length(jt.dest_loc_code) == 60) & (expr("substring(dest_loc_code, 51, 8)") == "00000000"),
+          expr("substring(dest_loc_code, -2)")) \
+    .when((length(jt.dest_loc_code) == 60) & (expr("substring(dest_loc_code, 51, 7)") == "0000000"),
+          expr("substring(dest_loc_code, -3)")) \
+    .when((length(jt.dest_loc_code) == 60) & (expr("substring(dest_loc_code, 51, 5)") == "00000"),
+          expr("substring(dest_loc_code, -5)")) \
+    .when((length(jt.dest_loc_code) == 60) & (expr("substring(dest_loc_code, 51, 4)") == "0000"),
+          expr("substring(dest_loc_code, -6)")) \
+    .when((length(jt.dest_loc_code) == 60) & (expr("substring(dest_loc_code, 51, 3)") == "000"),
+          concat_ws("", expr("substring(dest_loc_code, 54, 3)"), expr("substring(dest_loc_code, 58, 3)"))) \
+    .when((length(jt.dest_loc_code) == 60),
+          expr("substring(dest_loc_code, -10)")) \
+    .when((length(jt.dest_loc_code) == 7) & (instr(jt.dest_loc_code, " ") > 0),
+          concat_ws("", expr("substring(dest_loc_code, 1, 3)"), expr("substring(dest_loc_code, 5, 3)"))) \
+    .otherwise(jt.dest_loc_code).alias("dest_loc_code"),
+  
+  fs.tdc_val_code.alias("tdc_val_code"),
+  fs.frt_auction_ind.alias("frt_auction_ind"),
+  
+  # Customer levels from cust_656_postal_codes:
+  cs.cust_1_name.alias("customer_l1"),
+  cs.cust_2_name.alias("customer_l2"),
+  cs.cust_3_name.alias("customer_l3"),
+  cs.cust_4_name.alias("customer_l4"),
+  cs.cust_5_name.alias("customer_l5"),
+  cs.cust_6_name.alias("customer_l6"),
+  cs.cust_7_name.alias("customer_l7"),
+  cs.cust_8_name.alias("customer_l8"),
+  cs.cust_9_name.alias("customer_l9"),
+  cs.cust_10_name.alias("customer_l10"),
+  cs.cust_11_name.alias("customer_l11"),
+  cs.cust_12_name.alias("customer_l12"),
+  cs.postal_code.alias("destination_postal"),
+  
+  mer.exchg_rate.alias("exchg_rate"),
+  when(fs.frt_cost_chrg_code == "ORIGINAL", fs.tot_trans_costs_amt).otherwise(None).alias("contracted_cost"),
+  jt.tdc_val_code_count.alias("tdc_val_code_count"),
+  jt.orign_zone_code,
+  jt.frt_type_name,
+  when(fs.frt_type_code.like("%C%"), F.lit("Customer"))
+     .when(fs.frt_type_code.like("%I%"), F.lit("Interplant"))
+     .when(fs.frt_type_code.like("%E%") & (substring(fs.ship_to_num,1,1) == "P"), F.lit("Interplant"))
+     .otherwise(F.lit("Customer")).alias("freight_type"),
+  when(jt.truckload_vs_intermodal.isNull(), F.lit("Service code not found")).otherwise(jt.truckload_vs_intermodal).alias("truckload_vs_intermodal"),
+  tc.fcc_desc.alias("fcc_desc"),
+  tc.freight_charge_description_2.alias("freight_charge_description_2"),
+  tc.flow_reason.alias("flow_reason"),
+  tc.accessorial_reason.alias("accessorial_reason"),
+  when(substring(fs.ship_to_num,1,1) == "P", F.lit("I")).otherwise(F.lit("C")).alias("operational_freight_type"),
+  
+  when(cs.cust_3_name.like("%AB ACQUISITION, LLC%"), F.lit("ALBERTSONS SAFEWAY")) \
+    .when((cs.cust_3_name.like("%COSTCO COMPANIES, INC. (WW)%")) & (cs.cust_5_name.like("%COSTCO CORP US%")), F.lit("COSTCO")) \
+    .when((cs.cust_3_name.like("%COSTCO COMPANIES, INC. (WW)%")) & (cs.cust_5_name.like("%COSTCO WHSL (CA)%")), F.lit("COSTCO CANADA")) \
+    .when(cs.cust_3_name.like("%BJ%S WHOLESALE (WW)%"), F.lit("BJS")) \
+    .when(cs.cust_3_name.like("%CVS CORPORATION US%"), F.lit("CVS")) \
+    .when(cs.cust_3_name.like("%TARGET CORP US%"), F.lit("TARGET")) \
+    .when((cs.cust_3_name.like("%WAL-MART CORP. (WW)%")) & (cs.cust_5_name.like("SAM%")), F.lit("SAMS")) \
+    .when((cs.cust_3_name.like("%WAL-MART CORP. (WW)%")) & (cs.cust_12_name.like("SAM%")), F.lit("SAMS")) \
+    .when((cs.cust_3_name.like("%WAL-MART CORP. (WW)%")) & (~cs.cust_5_name.like("SAM%")), F.lit("WALMART")) \
+    .when(cs.cust_3_name.like("%Null%"), fs.ship_to_party_desc) \
+    .when(cs.cust_3_name.isNull(), fs.ship_to_party_desc) \
+    .when(cs.cust_3_name.like("%THE KROGER CO. US%"), F.lit("KROGER")) \
+    .when(cs.cust_3_name.like("%UNKN LVL 3 UNKNOWN CUSTOMER%"), fs.ship_to_party_desc) \
+    .otherwise(cs.cust_3_name).alias("customer_description"),
+  
+  when(fs.crncy_code == "USD", fs.tot_trans_costs_amt)
+     .otherwise( when(mer.exchg_rate.isNotNull(), fs.tot_trans_costs_amt * mer.exchg_rate).otherwise(None) ).alias("total_transportation_cost_usd"),
+  jt.carrier_desc.alias("1st_tendered_carrier"),
+  jt.serv_tms_code.alias("serv_tms_code"),
+  F.lit("first_tendered_carrier_id").alias("first_tendered_carrier_id"),
+  F.lit("first_tendered_carrier_description").alias("first_tendered_carrier_description"),
+  F.lit("first_tendered_carrier_tms_service").alias("first_tendered_carrier_tms_service"),
+  F.lit("first_tendered_carrier_award").alias("first_tendered_carrier_award"),
+  F.lit("first_tendered_carrier_rate").alias("first_tendered_carrier_rate"),
+  F.lit("weighted_average_rate").alias("weighted_average_rate"),
+  mb.bu_material.alias("bu_matched_by_material"),
+  tb.bu_tdc.alias("bu_matched_by_tdc"),
+  mb.product_category_material.alias("category_matched_by_material"),
+  tb.product_category_tdc.alias("category_matched_by_tdc"),
+  jt.dstnc_qty.alias("distance_per_load"),
+  when(fs.tfts_load_tmstp.like("%Historical load%"), F.lit(1)).otherwise(F.lit(0)).alias("historical_data")
+).alias("joined_table")
+
+# ---------------------------------------------------------------------------
+# 4. FINAL JOIN with dest_loc_id_from_tac (alias temp_tfs)
+# ---------------------------------------------------------------------------
+final_df = first_phase_table.join(
+  dl,
+  (col("joined_table.shpmt_id") == col("temp_tfs.load_id")) &
+  (upper(col("joined_table.freight_type")) == upper(col("temp_tfs.freight_type_code"))),
+  "left"
+)
+
+# ---------------------------------------------------------------------------
+# 5. WRITE THE FINAL DATAFRAME AS THE HIVE TABLE
+# ---------------------------------------------------------------------------
+final_df.write.mode("overwrite").saveAsTable("tfs_technical_names_merged_2")
+
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.window import Window
+
+# Initialize SparkSession with Hive support
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+
+# ========= Step 24: Awards Rate Operational Tariff Filtered ============
+# Read the operational tariff star table
+operational_tariff_df = spark.table("operational_tariff_star")
+
+# Filter out expired rates using unix_timestamp
+filtered_ot_df = operational_tariff_df.filter(
+    F.unix_timestamp("rate_exp_date", "yyyy-MM-dd") > F.unix_timestamp()
+)
+
+# Define a window partition by carrier_id, lane_origin_zone_code, lane_dstn_zone_id, service_code,
+# year(report_date), and weekofyear(report_date); order by report_date DESC.
+w_ot = Window.partitionBy("carrier_id", "lane_origin_zone_code", "lane_dstn_zone_id", "service_code",
+                            F.year("report_date"), F.weekofyear("report_date")).orderBy(F.col("report_date").desc())
+
+# Compute row_number() over the window and filter for row_num = 1
+awards_df = filtered_ot_df.withColumn("row_num", F.row_number().over(w_ot)) \
+    .filter(F.col("row_num") == 1) \
+    .drop("row_num")
+
+# Write out as a Parquet table
+awards_df.write.mode("overwrite").format("parquet").saveAsTable("awards_rate_operational_tariff_filtered")
+
+# ========= Step 25: First Tender Carrier 1 ============
+# Read the tac_technical_name_star and vendor_masterdata_carrier_description tables
+tac_df = spark.table("tac_technical_name_star")
+vendor_df = spark.table("vendor_masterdata_carrier_description")
+
+# Filter tac_df for tender_event_type_code = 'TENDFRST'
+tac_filtered = tac_df.filter(F.col("tender_event_type_code") == "TENDFRST")
+
+# Define a window partition by load_id ordering by tender_date and tender_datetm descending
+w_tac = Window.partitionBy("load_id").orderBy(F.col("tender_date"), F.col("tender_datetm").desc())
+tac_with_row = tac_filtered.withColumn("row_num", F.row_number().over(w_tac))
+
+# Select only the first row per load_id
+tac_first = tac_with_row.filter(F.col("row_num") == 1)
+
+# Join with the vendor_masterdata_carrier_description to bring in the carrier description
+first_tender_carrier1_df = tac_first.join(vendor_df, tac_first.forward_agent_id == vendor_df.carrier_id, "left") \
+  .select(
+     tac_first.load_id,
+     tac_first.forward_agent_id.alias("first_tendered_carrier_id"),
+     vendor_df.carrier_desc.alias("first_tendered_carrier_description"),
+     tac_first.service_tms_code.alias("first_tendered_carrier_tms_service"),
+     tac_first.actual_goods_issue_date.alias("act_goods_issue_date"),
+     tac_first.origin_zone_code.alias("orign_zone_code"),
+     tac_first.dest_zone_code.alias("destination_zone"),
+     tac_first.postal_code.alias("postl_code"),
+     tac_first.avg_award_weekly_vol_qty.alias("first_tendered_carrier_award")
+  )
+
+# Create a temporary view first_tender_carrier1
+first_tender_carrier1_df.createOrReplaceTempView("first_tender_carrier1")
+
+# ========= Step 26: First Tender Carrier 2 ============
+# Read the operational_tariff_filter table
+optf_df = spark.table("operational_tariff_filter")
+
+# Build the join conditions:
+join_condition = (
+    (F.col("tacf.first_tendered_carrier_id") == F.col("optf.`CARRIER ID`")) &
+    (F.col("tacf.first_tendered_carrier_tms_service") == F.col("optf.`SERVICE`")) &
+    (F.col("tacf.orign_zone_code") == F.col("optf.`LANE ORIGIN ZONE`")) &
+    (F.col("tacf.destination_zone") == F.col("optf.`LANE DESTINATION ZONE`")) &
+    (F.unix_timestamp(F.col("optf.`report date`"), "yyyy-MM-dd").between(
+         F.unix_timestamp(F.col("optf.`RATE EFFECTIVE DATE`"), "yyyy-MM-dd"),
+         F.unix_timestamp(F.col("optf.`RATE EXP DATE`"), "yyyy-MM-dd")
+    ))
+)
+
+# Additional date condition: act_goods_issue_date between report date and date_add(report date, 6)
+date_condition = F.unix_timestamp(F.col("tacf.act_goods_issue_date"), "dd/MM/yyyy").between(
+    F.unix_timestamp(F.col("optf.`report date`"), "yyyy-MM-dd"),
+    F.unix_timestamp(F.date_add(F.col("optf.`report date`"), 6), "yyyy-MM-dd")
+)
+
+# Join first_tender_carrier1 (alias tacf) with optf_df and apply the date condition.
+first_tender_carrier2_df = spark.table("first_tender_carrier1").alias("tacf") \
+  .join(optf_df.alias("optf"), join_condition, "left") \
+  .filter(date_condition & F.col("first_tendered_carrier_description").isNotNull()) \
+  .selectExpr(
+      "tacf.load_id",
+      "tacf.first_tendered_carrier_id",
+      "tacf.first_tendered_carrier_description",
+      "tacf.first_tendered_carrier_tms_service",
+      "tacf.act_goods_issue_date",
+      "tacf.orign_zone_code",
+      "tacf.destination_zone",
+      "tacf.postl_code",
+      "tacf.first_tendered_carrier_award",
+      "optf.`RATE` as rate",
+      "optf.`report date` as report_date"
+  ).distinct()
+
+# Create a temporary view first_tender_carrier2
+first_tender_carrier2_df.createOrReplaceTempView("first_tender_carrier2")
+
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.window import Window
+
+# Initialize SparkSession with Hive support
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+
+# ------------------- Step A: Load & Filter Source Data -------------------
+# Load the operational tariff filter table.
+df_op = spark.table("operational_tariff_filter") \
+  .select(
+    F.col("LANE ORIGIN ZONE").alias("lane_origin_zone_code"),
+    F.col("LANE DESTINATION ZONE").alias("lane_dstn_zone_id"),
+    F.col("CARRIER ID").alias("carrier_id"),
+    F.col("SERVICE").alias("service_code"),
+    F.col("report date").alias("report_date"),
+    F.col("AWARDS"),
+    F.col("RATE"),
+    F.col("RATE EFFECTIVE DATE"),
+    F.col("RATE EXP DATE")
+  ) \
+  .filter(
+    F.unix_timestamp("report date", "yyyy-MM-dd").between(
+      F.unix_timestamp("RATE EFFECTIVE DATE", "yyyy-MM-dd"),
+      F.unix_timestamp("RATE EXP DATE", "yyyy-MM-dd")
+    )
+  )
+
+# ------------------- Step B: Compute Rate Percentage -------------------
+# Define a window over (lane_origin_zone_code, lane_dstn_zone_id, report_date)
+w_sum = Window.partitionBy("lane_origin_zone_code", "lane_dstn_zone_id", "report_date")
+
+df_op = df_op.withColumn("sum_awards", F.sum("AWARDS").over(w_sum))
+
+# Compute pct_by_rate: round(RATE * round(AWARDS/sum_awards, 4),4) cast to decimal(38,4)
+df_op = df_op.withColumn("pct_by_rate",
+             F.round(F.col("RATE") *
+                     F.round(F.col("AWARDS") / F.col("sum_awards"), 4), 4)
+             .cast("decimal(38,4)"))
+
+# ------------------- Step C: Aggregate to Compute Weighted Average -------------------
+# Group by lane_origin_zone_code, lane_dstn_zone_id, and report_date;
+# weighted_average_rate = sum(pct_by_rate)
+df_war = df_op.groupBy("lane_origin_zone_code", "lane_dstn_zone_id", "report_date") \
+             .agg(F.sum("pct_by_rate").alias("weighted_average_rate"))
+
+# ------------------- Step D: Compute Row Number & Previous Rate -------------------
+w_order = Window.partitionBy("lane_origin_zone_code", "lane_dstn_zone_id").orderBy("report_date")
+df_a = df_war.withColumn("rownum", F.row_number().over(w_order)) \
+           .withColumn("prev_rate", F.lag("weighted_average_rate", 1).over(w_order))
+
+# ------------------- Step E: Mark Rate Change -------------------
+df_a = df_a.withColumn("val_changed",
+         F.when(F.col("weighted_average_rate") != F.col("prev_rate"), F.col("rownum"))
+         .when(F.col("prev_rate").isNull(), F.col("rownum"))
+         .otherwise(F.lit(None))
+)
+
+# ------------------- Step F: Compute Group Key using LAST_VALUE -------------------
+# Use LAST_VALUE with ignore nulls
+df_b = df_a.withColumn("grp_key",
+         F.last("val_changed", ignorenulls=True).over(w_order.rowsBetween(Window.unboundedPreceding, Window.currentRow))
+)
+
+# ------------------- Step G: Aggregate by Group Key -------------------
+# For each group, compute report_date_from (min(report_date)) and report_date_to (max(report_date))
+df_c = df_b.groupBy("lane_origin_zone_code", "lane_dstn_zone_id", "grp_key", "weighted_average_rate") \
+           .agg(F.min("report_date").alias("report_date_from"),
+                F.max("report_date").alias("report_date_to"))
+
+# ------------------- Step H: Determine Next Report Date -------------------
+w_lead = Window.partitionBy("lane_origin_zone_code", "lane_dstn_zone_id").orderBy("report_date_from")
+df_final = df_c.withColumn("next_report_date_from",
+               F.coalesce(
+                 F.date_add(F.lead("report_date_from", 1).over(w_lead), -1),
+                 F.col("report_date_to")
+               )
+)
+
+# ------------------- Write the Final Table -------------------
+df_final.write.mode("overwrite").format("parquet").saveAsTable("weighted_awards_for_lanes1")
+
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.window import Window
+
+# Initialize SparkSession with Hive support
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+
+# ==================== Phase 1: Load & Filter Source Data ====================
+# Read from operational_tariff_filter and apply the date range filter
+df_raw = spark.table("operational_tariff_filter") \
+  .filter(
+    F.unix_timestamp(F.col("report date"), "yyyy-MM-dd").between(
+      F.unix_timestamp(F.col("RATE EFFECTIVE DATE"), "yyyy-MM-dd"),
+      F.unix_timestamp(F.col("RATE EXP DATE"), "yyyy-MM-dd")
+    )
+  ) \
+  .selectExpr(
+    "distinct `SF LANE`", 
+    "`CARRIER ID` as carrier_id", 
+    "`SERVICE` as service_code", 
+    "`report date` as report_date", 
+    "cast(COALESCE(`AWARDS`, 0) as double) as AWARDS", 
+    "cast(COALESCE(`RATE`, 0) as double) as RATE", 
+    "`TOTAL SF Award Volume`"
+  )
+
+# ==================== Phase 2: Compute SF Rate Times SF PCT Award ====================
+df_new = df_raw.withColumn("SF PCT Award", F.col("AWARDS") / F.col("TOTAL SF Award Volume")) \
+               .withColumn("SF Rate Times SF PCT Award", F.col("RATE") * F.col("SF PCT Award"))
+
+# ==================== Phase 3: Compute SF WAR per Lane & Report Date ====================
+df_war = df_new.groupBy("SF LANE", "report_date") \
+               .agg(F.sum("SF Rate Times SF PCT Award").alias("SF WAR"))
+
+# ==================== Phase 4: Compute Row Number and LAG ====================
+w_order = Window.partitionBy("SF LANE").orderBy("report_date")
+df_a = df_war.withColumn("rownum", F.row_number().over(w_order)) \
+             .withColumn("prev_rate", F.lag("SF WAR", 1).over(w_order))
+
+# ==================== Phase 5: Mark Rate Changes ====================
+df_b = df_a.withColumn("val_changed",
+           F.when(F.col("SF WAR") != F.col("prev_rate"), F.col("rownum"))
+            .when(F.col("prev_rate").isNull(), F.col("rownum"))
+            .otherwise(F.lit(None))
+)
+
+# ==================== Phase 6: Compute Group Key using LAST_VALUE ====================
+w_unbounded = Window.partitionBy("SF LANE").orderBy("report_date").rowsBetween(Window.unboundedPreceding, Window.currentRow)
+df_c = df_b.withColumn("grp_key", F.last("val_changed", ignorenulls=True).over(w_unbounded))
+
+# ==================== Phase 7: Aggregate by Group ====================
+df_d = df_c.groupBy("SF LANE", "grp_key", "SF WAR") \
+           .agg(F.min("report_date").alias("report_date_from"),
+                F.max("report_date").alias("report_date_to"))
+
+# ==================== Phase 8: Compute Next Report Date ====================
+w_lead = Window.partitionBy("SF LANE").orderBy("report_date_from")
+df_e = df_d.withColumn("next_report_date_from",
+             F.coalesce(
+               F.date_add(F.lead("report_date_from", 1).over(w_lead), -1),
+               F.col("report_date_to")
+             )
+)
+
+# ==================== Phase 9: Select Final Columns and Write Table ====================
+df_result = df_e.select(
+    F.col("SF LANE").alias("SF_Lane"),
+    F.col("grp_key").alias("Grp_key"),
+    F.col("SF WAR").alias("SF_War"),
+    F.col("report_date_from").alias("Report_date_from"),
+    F.col("report_date_to").alias("Report_date_to"),
+    F.col("next_report_date_from").alias("Next_report_date_from")
+)
+
+df_result.write.mode("overwrite").format("parquet").saveAsTable("Tariff_WAR_By_Report_Date")
+
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.functions import expr, col, when, coalesce, concat_ws, substring, year, weekofyear, lit, upper
+
+# Initialize SparkSession with Hive support
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+
+# ---------------------------------------------------------------------------
+# Load the source and lookup tables
+# ---------------------------------------------------------------------------
+df_m2   = spark.table("tfs_technical_names_merged_2").alias("m2")
+df_aw   = spark.table("awards_rate_operational_tariff_filtered").alias("aw")
+df_ftc1 = spark.table("first_tender_carrier1").alias("ft1")
+df_ftc2 = spark.table("first_tender_carrier2").alias("ft2")
+df_mer  = spark.table("month_exchng_rate_rds").alias("mer")
+df_ship = spark.table("shipping_location").alias("ship")
+# Note: table shipping_location contains columns 
+#    `location id` and `corporate id 2`.
+
+# ---------------------------------------------------------------------------
+# Build the join conditions for tfs_technical_names_merged_3
+# ---------------------------------------------------------------------------
+cond_aw = (col("m2.carr_id") == col("aw.carr_id")) & \
+          (col("m2.tfs_origin_zone_name") == col("aw.lane_origin_zone_code")) & \
+          (col("m2.dest_zone_val") == col("aw.lane_dest_zone_id")) & \
+          (col("m2.service_tms_code") == col("aw.serv_id")) & \
+          (year(col("m2.actual_gi_date")) == year(col("aw.report_date"))) & \
+          (weekofyear(col("m2.actual_gi_date")) == weekofyear(col("aw.report_date")))
+
+cond_ftc1 = col("m2.shpmt_id") == col("ft1.load_id")
+cond_ftc2 = col("m2.shpmt_id") == col("ft2.load_id")
+
+cond_mer = concat_ws("-", substring(col("m2.actual_gi_date"), 1, 4),
+                       substring(col("m2.actual_gi_date"), 6, 2)) == col("mer.year_month")
+
+cond_ship = col("m2.dest_loc_code") == col("ship.`location id`")
+
+# ---------------------------------------------------------------------------
+# Build the final DataFrame for tfs_technical_names_merged_3
+# ---------------------------------------------------------------------------
+df_m3 = df_m2 \
+  .join(df_aw, cond_aw, "left") \
+  .join(df_ftc1, cond_ftc1, "left") \
+  .join(df_ftc2, cond_ftc2, "left") \
+  .join(df_mer, cond_mer, "left") \
+  .join(df_ship, cond_ship, "left")
+
+df_m3 = df_m3.select(
+    col("m2.*"),
+    # First Tender Carrier from ft1
+    col("ft1.first_tendered_carrier_id").alias("first_tender_carr_id"),
+    col("ft1.first_tendered_carrier_description").alias("first_tender_carr_desc"),
+    col("ft1.first_tendered_carrier_tms_service").alias("first_tender_carr_tms_service_code"),
+    col("ft1.first_tendered_carrier_award").alias("first_tender_carr_award_qty"),
+    # First Tender Carrier rate from ft2
+    col("ft2.rate").alias("first_tender_carr_rate"),
+    # Primary Carrier Flag: if awards_rate > 0.02 then 1 else 0
+    when(col("aw.awards_rate") > 0.02, lit(1)).otherwise(lit(0)).alias("primary_carr_flag"),
+    # Accrual cost USD amount:
+    when(col("m2.billing_proposal_num") == "ACCRUAL", 
+         when(col("m2.currency_code") == "CAD", 
+              when(col("mer.exchg_rate").isNotNull(), col("m2.accrual_cost_amt") * col("mer.exchg_rate"))
+              .otherwise(col("m2.accrual_cost_amt"))
+             ).otherwise(col("m2.accrual_cost_amt"))
+        ).otherwise(lit(None)).alias("accrual_cost_usd_amt"),
+    # Total trans. cost USD including accrual
+    coalesce(
+      (when(col("m2.billing_proposal_num") == "ACCRUAL", 
+            when(col("m2.currency_code") == "CAD", 
+                 when(col("mer.exchg_rate").isNotNull(), col("m2.accrual_cost_amt") * col("mer.exchg_rate"))
+                 .otherwise(col("m2.accrual_cost_amt"))
+                ).otherwise(col("m2.accrual_cost_amt"))
+           ).otherwise(lit(None)) + col("m2.total_trans_cost_usd_amt")),
+      col("m2.total_trans_cost_usd_amt")
+    ).alias("total_trans_cost_usd_include_accrual_amt"),
+    # Destination Ship From Code:
+    when(col("m2.actual_gi_date") < lit("2018-05-26"),
+         when(col("m2.freight_type_val") == "Interplant",
+              when(col("ship.`location id`") == col("m2.dest_loc_code"),
+                   col("ship.`corporate id 2`")
+              ).otherwise(coalesce(col("m2.dest_postal_code"), col("m2.dest_loc_code")))
+         ).otherwise(coalesce(col("m2.dest_postal_code"), col("m2.dest_loc_code")))
+    ).otherwise(
+         when(col("m2.freight_type_val") == "Interplant",
+              when(col("ship.`location id`") == col("m2.dest_loc_code"),
+                   col("ship.`corporate id 2`")
+              ).otherwise(col("m2.dest_loc_code"))
+         ).otherwise(col("m2.dest_loc_code"))
+    ).alias("dest_ship_from_code")
+)
+
+# Write the final DataFrame as a Hive table tfs_technical_names_merged_3
+df_m3.write.mode("overwrite").saveAsTable("tfs_technical_names_merged_3")
+
+# ---------------------------------------------------------------------------
+# Step 3: Create temporary view tfs_shpmt_list from merged table
+# ---------------------------------------------------------------------------
+df_shpmt_list = spark.table("tfs_technical_names_merged_3").select(
+    "shpmt_id",
+    concat_ws("-", expr("substring(tfs_origin_zone_name, 1, 20)"), expr("substring(dest_ship_from_code, 1, 20)")).alias("SF_Lane"),
+    "tfs_origin_zone_name",
+    "freight_type_val",
+    "dest_ship_from_code",
+    "dest_postal_code",
+    "dest_zone_val",
+    "actual_gi_date",
+    "ship_point_code",
+    "dest_loc_code"
+).distinct()
+
+df_shpmt_list.createOrReplaceTempView("tfs_shpmt_list")
+
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.functions import expr, col, when, coalesce, lit, substring
+from pyspark.sql.types import StringType
+
+# Initialize SparkSession with Hive support
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+
+##############################################################################
+# PART I: Build weighted_awards_for_lanes2_new_data
+##############################################################################
+
+# Load the base table used in these joins
+tfs = spark.table("tfs_shpmt_list").alias("tfs")
+
+# --- Subquery: wal1_new ---
+# This subquery joins tfs_shpmt_list with Tariff_WAR_By_Report_Date
+tariff = spark.table("Tariff_WAR_By_Report_Date").alias("wal1")
+df_wal1_new = tariff.join(tfs,
+    F.coalesce(tfs["SF LANE"], lit("XXX")) == F.coalesce(F.col("wal1.SF_LANE"), lit("XXX"))
+).filter(
+    (tfs.actual_gi_date >= F.col("wal1.report_date_from")) & 
+    (tfs.actual_gi_date <= F.col("wal1.next_report_date_from"))
+).select(
+    tfs.shpmt_id.alias("shpmt_id"),
+    tfs["SF LANE"],
+    tfs.tfs_origin_zone_name,
+    tfs.dest_ship_from_code,
+    tfs.dest_postal_code,
+    tfs.actual_gi_date,
+    F.col("wal1.report_date_from").alias("report_date_from1_new"),
+    F.col("wal1.next_report_date_from").alias("next_report_date_from1_new"),
+    F.col("wal1.`SF WAR`").alias("weighted_average_rate1_new")
+)
+
+# --- Subquery: wal1_1 ---
+# Join tfs_shpmt_list with weighted_awards_for_lanes1 based on origin and destination zone values.
+wa1 = spark.table("weighted_awards_for_lanes1").alias("wal1")
+df_wal1_1 = wa1.join(tfs,
+    (F.coalesce(tfs.tfs_origin_zone_name, lit("XXX")) == F.coalesce(F.col("wal1.lane_origin_zone_code"), lit("XXX"))) &
+    (F.coalesce(tfs.dest_zone_val, lit("XXX")) == F.coalesce(F.col("wal1.lane_dstn_zone_id"), lit("XXX")))
+).filter(
+    (tfs.actual_gi_date >= F.col("wal1.report_date_from")) &
+    (tfs.actual_gi_date <= F.col("wal1.next_report_date_from"))
+).select(
+    tfs.shpmt_id.alias("shpmt_id"),
+    tfs.tfs_origin_zone_name.alias("tfs_origin_zone_name"),
+    tfs.dest_ship_from_code.alias("dest_ship_from_code"),
+    tfs.dest_postal_code.alias("dest_postal_code"),
+    tfs.actual_gi_date.alias("actual_gi_date"),
+    F.col("wal1.report_date_from").alias("report_date_from1"),
+    F.col("wal1.next_report_date_from").alias("next_report_date_from1"),
+    F.col("wal1.weighted_average_rate").alias("weighted_average_rate1")
+)
+
+# --- Subquery: wal1_2 ---
+# For this join, if freight_type_val is Interplant, then the join key for destination is dest_ship_from_code,
+# otherwise we use dest_postal_code.
+wa2 = spark.table("weighted_awards_for_lanes1").alias("wal2")
+df_wal1_2 = wa2.join(tfs,
+    (F.coalesce(tfs.tfs_origin_zone_name, lit("XXX")) == F.coalesce(F.col("wal2.lane_origin_zone_code"), lit("XXX"))) &
+    (
+      when(tfs.freight_type_val == "Interplant", tfs.dest_ship_from_code)
+      .otherwise(F.coalesce(tfs.dest_postal_code, lit("XXX"))) == F.col("wal2.lane_dstn_zone_id")
+    )
+).filter(
+    (tfs.actual_gi_date >= F.col("wal2.report_date_from")) &
+    (tfs.actual_gi_date <= F.col("wal2.next_report_date_from"))
+).select(
+    tfs.shpmt_id.alias("shpmt_id"),
+    tfs.tfs_origin_zone_name.alias("tfs_origin_zone_name"),
+    tfs.dest_ship_from_code.alias("dest_ship_from_code"),
+    tfs.dest_postal_code.alias("dest_postal_code"),
+    tfs.actual_gi_date.alias("actual_gi_date"),
+    F.col("wal2.report_date_from").alias("report_date_from2"),
+    F.col("wal2.next_report_date_from").alias("next_report_date_from2"),
+    F.col("wal2.weighted_average_rate").alias("weighted_average_rate2")
+)
+
+# --- Subquery: wal1_3 ---
+# Join on ship_point_code and dest_loc_code.
+wa3 = spark.table("weighted_awards_for_lanes1").alias("wal3")
+df_wal1_3 = wa3.join(tfs,
+    (tfs.ship_point_code == F.col("wal3.lane_origin_zone_code")) &
+    (tfs.dest_loc_code == F.col("wal3.lane_dstn_zone_id"))
+).filter(
+    (tfs.actual_gi_date >= F.col("wal3.report_date_from")) & 
+    (tfs.actual_gi_date <= F.col("wal3.next_report_date_from"))
+).select(
+    tfs.shpmt_id.alias("shpmt_id"),
+    tfs.tfs_origin_zone_name.alias("tfs_origin_zone_name"),
+    tfs.dest_ship_from_code.alias("dest_ship_from_code"),
+    tfs.dest_postal_code.alias("dest_postal_code"),
+    tfs.actual_gi_date.alias("actual_gi_date"),
+    F.col("wal3.report_date_from").alias("report_date_from3"),
+    F.col("wal3.next_report_date_from").alias("next_report_date_from3"),
+    F.col("wal3.weighted_average_rate").alias("weighted_average_rate3")
+)
+
+# --- Subquery: wal1_4 ---
+# Join on ship_point_code and dest_zone_val.
+wa4 = spark.table("weighted_awards_for_lanes1").alias("wal4")
+df_wal1_4 = wa4.join(tfs,
+    (F.coalesce(tfs.tfs_origin_zone_name, lit("XXX")) == F.coalesce(F.col("wal4.tfs_origin_zone_name"), lit("XXX"))) &
+    (tfs.dest_zone_val == F.col("wal4.lane_dstn_zone_id"))
+).filter(
+    (tfs.actual_gi_date >= F.col("wal4.report_date_from")) &
+    (tfs.actual_gi_date <= F.col("wal4.next_report_date_from"))
+).select(
+    tfs.shpmt_id.alias("shpmt_id"),
+    tfs.tfs_origin_zone_name.alias("tfs_origin_zone_name"),
+    tfs.dest_ship_from_code.alias("dest_ship_from_code"),
+    tfs.dest_postal_code.alias("dest_postal_code"),
+    tfs.actual_gi_date.alias("actual_gi_date"),
+    F.col("wal4.report_date_from").alias("report_date_from4"),
+    F.col("wal4.next_report_date_from").alias("next_report_date_from4"),
+    F.col("wal4.weighted_average_rate").alias("weighted_average_rate4")
+)
+
+# ------------------- Now, join all subquery results back to tfs -------------------
+# We perform left outer joins on keys: shpmt_id, join on a common SF lane (or origin zone) and actual_gi_date.
+df_final_join = tfs.alias("tfs") \
+  .join(df_wal1_new.alias("wal1_new"),
+        (col("tfs.shpmt_id") == col("wal1_new.shpmt_id")) &
+        (F.coalesce(col("tfs.`SF LANE`"), lit("XXX")) == F.coalesce(col("wal1_new.`SF LANE`"), lit("XXX"))) &
+        (col("tfs.actual_gi_date") == col("wal1_new.actual_gi_date")),
+        "left") \
+  .join(df_wal1_1.alias("wal1_1"),
+        (col("tfs.shpmt_id") == col("wal1_1.shpmt_id")) &
+        (F.coalesce(col("tfs.tfs_origin_zone_name"), lit("XXX")) == F.coalesce(col("wal1_1.tfs_origin_zone_name"), lit("XXX"))) &
+        (col("tfs.dest_ship_from_code") == col("wal1_1.dest_ship_from_code")) &
+        (F.coalesce(col("tfs.dest_postal_code"), lit("XXX")) == F.coalesce(col("wal1_1.dest_postal_code"), lit("XXX"))) &
+        (col("tfs.actual_gi_date") == col("wal1_1.actual_gi_date")),
+        "left") \
+  .join(df_wal1_2.alias("wal1_2"),
+        (col("tfs.shpmt_id") == col("wal1_2.shpmt_id")) &
+        (F.coalesce(col("tfs.tfs_origin_zone_name"), lit("XXX")) == F.coalesce(col("wal1_2.tfs_origin_zone_name"), lit("XXX"))) &
+        (col("tfs.dest_ship_from_code")
+		
+		
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.functions import col, when, coalesce, substring, lit
+
+# Initialize SparkSession with Hive support
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+
+# Load the main table and lookup tables
+df_m3 = spark.table("tfs_technical_names_merged_3").alias("m3")
+df_wal = spark.table("weighted_awards_for_lanes2_new_data").alias("wal")
+df_hier = spark.table("tdcval_hierarchy680_lkp_vw").alias("hier")
+
+# ---------------------------------------------------------------------------
+# LEFT JOIN with weighted awards (df_wal)
+# ---------------------------------------------------------------------------
+join_cond_wal = (
+    (col("m3.shpmt_id") == col("wal.shpmt_id")) &
+    (coalesce(col("m3.tfs_origin_zone_name"), lit("XXX")) == coalesce(col("wal.tfs_origin_zone_name"), lit("XXX"))) &
+    (col("m3.dest_ship_from_code") == col("wal.dest_ship_from_code")) &
+    (coalesce(col("m3.dest_postal_code"), lit("XXX")) == coalesce(col("wal.dest_postal_code"), lit("XXX"))) &
+    (col("m3.actual_gi_date") == col("wal.actual_gi_date")) &
+    (~col("m3.service_tms_code").like("LTL%")) &
+    (col("m3.country_to_code") != "MX")
+)
+
+df_join1 = df_m3.join(df_wal, join_cond_wal, "left")
+
+# ---------------------------------------------------------------------------
+# LEFT JOIN with TDCVAL hierarchy lookup (df_hier)
+# The join condition uses the substring of hierarchy child_id (from position 5 onward)
+# ---------------------------------------------------------------------------
+df_final = df_join1.join(df_hier, col("m3.tdcval_code") == substring(col("hier.child_id"), 5), "left")
+
+# ---------------------------------------------------------------------------
+# Select the required columns (as per your SQL SELECT list)
+# ---------------------------------------------------------------------------
+selected_df = df_final.select(
+    col("m3.shpmt_id"),
+    col("m3.tfs_origin_zone_name"),
+    col("m3.dest_zone_val"),
+    col("m3.ship_to_party_desc"),
+    col("m3.customer_desc"),
+    col("m3.carr_desc"),
+    col("m3.voucher_type_code"),
+    col("m3.tdcval_code"),
+    col("m3.freight_cost_charge_code"),
+    col("m3.tms_freight_charge_desc"),
+    col("m3.freight_charge2_desc"),
+    col("m3.flow_reason_val"),
+    col("m3.acsrl_reason_name"),
+    col("m3.total_trans_cost_usd_amt"),
+    col("m3.adjmt_cost_usd_amt"),
+    col("m3.contract_cost_usd_amt"),
+    col("m3.post_charge_cost_usd_amt"),
+    col("m3.spot_cost_usd_amt"),
+    col("m3.misc_cost_usd_amt"),
+    col("m3.weight_per_load_qty"),
+    col("m3.volume_per_load_qty"),
+    col("m3.floor_position_as_ship_cnt"),
+    col("m3.theortc_pallet_cnt"),
+    col("m3.actual_gi_date"),
+    col("m3.charge_code"),
+    col("m3.dlvry_id"),
+    col("m3.profit_center_code"),
+    col("m3.cntrlng_area_code"),
+    col("m3.distance_qty"),
+    col("m3.distance_uom"),
+    col("m3.total_weight_ship_qty"),
+    col("m3.weight_uom"),
+    col("m3.total_volume_ship_qty"),
+    col("m3.volume_uom"),
+    col("m3.currency_code"),
+    col("m3.su_per_load_qty"),
+    col("m3.ship_from_region_code"),
+    col("m3.ship_to_region_desc"),
+    col("m3.country_to_code"),
+    # From hierarchy lookup
+    col("hier.categ_name").alias("categ_code"),
+    col("hier.sector_name").alias("sector_desc"),
+    col("hier.subsector_name").alias("subsector_desc"),
+    col("m3.voucher_status_code"),
+    col("m3.voucher_ref_num"),
+    col("m3.country_from_desc_name"),
+    col("m3.country_to_desc_name"),
+    col("m3.equip_mode_desc"),
+    col("m3.ship_from_region_desc"),
+    col("m3.table_uom"),
+    col("m3.origin_desc"),
+    col("m3.cost_center_code"),
+    col("m3.voucher_id"),
+    col("m3.multi_stop_flag"),
+    col("m3.temp_protect_code"),
+    col("m3.spot_flag_val"),
+    col("m3.gbu_code"),
+    col("m3.goods_receipt_post_date"),
+    col("m3.create_tmstp"),
+    col("m3.create_date"),
+    col("m3.na_target_country_code"),
+    col("m3.ship_to_party_num"),
+    col("m3.ship_point_code"),
+    col("m3.trans_plan_point_code"),
+    col("m3.equip_mode_code"),
+    col("m3.trans_equip_type_code"),
+    col("m3.freight_type_customer_interplant_ind_code"),
+    col("m3.country_from_code"),
+    col("m3.tms_charge_lvl_desc"),
+    col("m3.tms_charge_kind_desc"),
+    col("m3.tms_interface_reason_cost_code"),
+    col("m3.chart_account_num"),
+    col("m3.step_factor"),
+    col("m3.company_code"),
+    col("hier.tdcval_name").alias("tdcval_desc"),
+    col("m3.freight_bill_create_date"),
+    col("m3.dlvry_item_cnt"),
+    col("m3.carr_country_name").alias("carr_country_name"),
+    col("m3.carr_country_code").alias("carr_country_code"),
+    when(col("m3.carr_country_name") == "US", substring(col("m3.carr_postal_code"), 1, 5))\
+        .otherwise(col("m3.carr_postal_code")).alias("carr_postal_code"),
+    col("m3.ship_to_postal_code"),
+    col("m3.ship_to_state_code"),
+    col("m3.ship_to_state_name"),
+    col("m3.minority_ind_val"),
+    when(col("m3.actual_gi_date") < lit("2018-06-01"), col("m3.dest_zone_val"))\
+        .otherwise(col("m3.dest_zone_go_name")).alias("dest_zone_go_name"),
+    when(col("m3.actual_gi_date") < lit("2018-06-01"), col("m3.tfs_origin_zone_name"))\
+        .otherwise(col("m3.origin_zone_name")).alias("origin_zone_name"),
+    col("m3.dest_loc_code"),
+    col("m3.charge_detail_id"),
+    col("m3.material_doc_num"),
+    col("m3.purchase_doc_num"),
+    col("m3.charge_kind_code"),
+    col("m3.charge_lvl"),
+    col("m3.billing_proposal_num"),
+    col("m3.gl_account_num"),
+    col("m3.step_per_load2_rate"),
+    col("m3.step_per_load_rate"),
+    col("m3.total_trans_cost_local_currency_amt"),
+    col("m3.cost_on_step_local_currency_amt"),
+    col("m3.adjmt_cost_local_currency_amt"),
+    col("m3.contract_cost_local_currency_amt"),
+    col("m3.post_charge_cost_local_currency_amt"),
+    col("m3.spot_cost_local_currency_amt"),
+    col("m3.misc_cost_local_currency_amt"),
+    col("m3.tfts_load_date"),
+    col("m3.load_from_file_url"),
+    col("m3.carr_id"),
+    col("m3.row_modify_tmstp"),
+    col("m3.freight_auction_val"),
+    col("m3.hist_data_structure_flag"),
+    col("m3.origin_longitude_val"),
+    col("m3.origin_latitude_val"),
+    col("m3.dest_longitude_val"),
+    col("m3.dest_latitude_val"),
+    col("m3.dest_postal_code"),
+    col("m3.five_digit_lane_name"),
+    col("m3.region_2_3_digit_lane_name"),
+    col("m3.customer_specific_lane_name"),
+    col("m3.customer1_lvl"),
+    col("m3.customer2_lvl"),
+    col("m3.customer3_lvl"),
+    col("m3.customer4_lvl"),
+    col("m3.customer5_lvl"),
+    col("m3.customer6_lvl"),
+    col("m3.customer7_lvl"),
+    col("m3.customer8_lvl"),
+    col("m3.customer9_lvl"),
+    col("m3.customer10_lvl"),
+    col("m3.customer11_lvl"),
+    col("m3.customer12_lvl"),
+    col("m3.carr_and_source_service_val"),
+    col("m3.accrual_cost_amt"),
+    col("m3.line_haul_cost_amt"),
+    col("m3.fuel_cost_amt"),
+    col("m3.other_contract_cost_amt"),
+    col("m3.frcst_cost_amt"),
+    col("m3.ave_total_trans_cost_per_pallet_amt"),
+    col("m3.total_trans_cost_per_lb_amt"),
+    col("m3.total_trans_cost_per_cubic_feet_volume_amt"),
+    col("m3.total_trans_cost_per_mile_amt"),
+    col("m3.total_trans_cost_per_su_amt"),
+    col("m3.accrued_contract_cost_amt"),
+    col("m3.accrued_line_haul_cost_amt"),
+    col("m3.accrued_fuel_cost_amt"),
+    col("m3.accrued_other_contract_cost_amt"),
+    col("m3.accrued_spot_charge_rate"),
+    col("m3.post_charge_cost_amt"),
+    col("m3.misc_cost_amt"),
+    col("m3.contract_cost_amt"),
+    col("m3.multi_tdcval_code"),
+    col("m3.min_charge_amt"),
+    col("m3.charge_reason_freight_concat_name"),
+    col("m3.avoidbl_touch_val"),
+    col("m3.opertn_freight_type_code"),
+    col("m3.truckload_vs_intermodal_val"),
+    col("m3.pgp_flag"),
+    col("m3.freight_type_val"),
+    col("m3.first_tender_carr_name"),
+    col("m3.service_tms_code"),
+    col("m3.distance_per_load_qty"),
+    col("m3.hist_data"),
+    col("m3.first_tender_carr_id"),
+    col("m3.first_tender_carr_desc"),
+    col("m3.first_tender_carr_tms_service_code"),
+    col("m3.first_tender_carr_award_qty"),
+    col("m3.first_tender_carr_rate"),
+    col("wal.weighted_average_rate").alias("weight_avg_rate"),
+    col("m3.primary_carr_flag"),
+    col("m3.accrual_cost_usd_amt"),
+    col("m3.total_trans_cost_usd_include_accrual_amt"),
+    col("m3.dest_ship_from_code")
+)
+
+# Write final DataFrame as the table tfs_technical_name_star in overwrite mode
+selected_df.write.mode("overwrite").saveAsTable("tfs_technical_name_star")

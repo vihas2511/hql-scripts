@@ -1,0 +1,58 @@
+from pyspark.sql import SparkSession, functions as F
+
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+
+# Assume df_tfs is your "tfs" table already loaded
+df_tfs = spark.table("tfs")
+
+# --- Inner aggregation (simulate your mx subquery) ---
+# Here we group by many detailed columns (including voucher_id) to compute aggregated fields.
+detailed_group_cols = [
+    "`load id`", "`origin zone`", "`destination zone`", 
+    "`customer description`", "`carrier description`", "`country to`", 
+    "`subsector description`", "`country to description`", 
+    "`goods receipt posting date`", "`freight auction`", 
+    "`historical data structure flag`", "`destination postal`", 
+    "`customer l8`", "truckload_vs_intermodal_val",
+    "`distance per load`", "`freight type`", "`service tms code`", "`voucher id`"
+]
+
+mx_df = df_tfs.groupBy(*detailed_group_cols).agg(
+    F.max("`actual gi date`").alias("actual_gi_date"),
+    F.max("`created date`").alias("created_date"),
+    F.max("`ship to #`").alias("ship_to_id"),
+    F.max("`ship to description`").alias("ship_to_description"),
+    F.min("`origin sf`").alias("origin_sf"),
+    F.min("`destination sf`").alias("destination_sf")
+)
+
+# Rename columns to match your inner query alias,
+# e.g., rename '`subsector description`' to subsector and '`voucher id`' to voucher_id
+mx_df = mx_df.withColumnRenamed("`subsector description`", "subsector")\
+             .withColumnRenamed("`voucher id`", "voucher_id")
+
+# --- Outer aggregation ---
+# Now we group only by subsector and voucher_id, taking MAX over aggregated values.
+outer_df = mx_df.groupBy("subsector", "voucher_id").agg(
+    F.max("origin_zone").alias("origin_zone"),
+    F.max("destination_zone").alias("destination_zone"),
+    F.max("customer_description").alias("customer_description"),
+    F.max("carrier_description").alias("carrier_description"),
+    F.max("actual_gi_date").alias("actual_gi_date"),
+    F.max("goods_receipt_posting_date").alias("goods_receipt_posting_date"),
+    F.max("created_date").alias("created_date"),
+    F.max("ship_to_id").alias("ship_to_id"),
+    F.max("freight_auction").alias("freight_auction"),
+    F.max("historical_data_structure_flag").alias("historical_data_structure_flag"),
+    F.max("destination_postal").alias("destination_postal"),
+    F.max("service_tms_code").alias("service_tms_code"),
+    F.max("customer_l8").alias("customer_l8"),
+    F.max("ship_to_description").alias("ship_to_description"),
+    F.max("distance_per_load").alias("distance_per_load"),
+    F.max("origin_sf").alias("origin_sf"),
+    F.max("destination_sf").alias("destination_sf"),
+    F.max("truckload_vs_intermodal_val").alias("truckload_vs_intermodal_val")
+)
+
+# Create temporary view from the final result.
+outer_df.createOrReplaceTempView("ds_subsectorcosts_max")
