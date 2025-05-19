@@ -1,0 +1,1 @@
+[UNRESOLVED_COLUMN.WITH_SUGGESTION] A column, variable, or function parameter with name `fs`.`destination_zone` cannot be resolved. Did you mean one of the following? [`jct`.`destination_zone`, `fs`.`cntry_to_code`, `fs`.`dstnc_uom`, `fs`.`regn_to_code`, `fs`.`ship_to_num`]. SQLSTATE: 42703
