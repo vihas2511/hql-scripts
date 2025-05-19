@@ -1,0 +1,145 @@
+-- Fully Optimized Freight Cost SQL Query
+
+WITH null_origin_lookup AS (
+    SELECT
+        ship_point_code AS shipping_point_code,
+        origin_zone_null_name AS origin_zone_null
+    FROM tfs_null_origin_lkp
+    GROUP BY ship_point_code, origin_zone_null_name
+),
+
+null_dest_lookup AS (
+    SELECT
+        dest_postal_code AS destination_postal_update,
+        dest_zone_val AS destination_zone_update
+    FROM tfs_null_dest_lkp
+    GROUP BY dest_postal_code, dest_zone_val
+),
+
+tfs_base AS (
+    SELECT
+        COALESCE(NULLIF(`load id`, ''), 'No Load ID') AS load_id,
+        `destination postal` AS destination_postal,
+        `voucher id` AS voucher_id,
+        `actual gi date` AS actual_gi_date,
+        CASE
+            WHEN `origin zone` = 'SF_EDWARDSVILLE' THEN 'SF_ST_LOUIS'
+            ELSE `origin zone`
+        END AS origin_zone,
+        CASE
+            WHEN `destination zone` = 'SF_EDWARDSVILLE' THEN 'SF_ST_LOUIS'
+            ELSE `destination zone`
+        END AS destination_zone,
+        `delivery id #` AS delivery_id,
+        `tdc val code` AS tdc_val_code,
+        `freight cost charge` AS freight_cost_charge,
+        CAST(`total transportation cost usd` AS DECIMAL(30,8)) AS total_cost_usd,
+        CAST(`total transportation cost local currency` AS DECIMAL(30,8)) AS total_cost_local,
+        COALESCE(`subsector description`, 'MISSING') AS subsector,
+        CAST(`#su per load` AS DECIMAL(30,8)) AS su,
+        CAST(`steps` AS DECIMAL(30,8)) AS steps,
+        CAST(`total transportation cost local currency` AS DECIMAL(30,8)) / NULLIF(CAST(`total transportation cost usd` AS DECIMAL(30,8)), 0) AS cost_ratio,
+        CASE `freight cost charge`
+            WHEN 'FSUR' THEN 'FUEL'
+            WHEN 'FU_S' THEN 'FUEL'
+            WHEN 'FLTL' THEN 'FUEL'
+            WHEN 'FFLT' THEN 'FUEL'
+            WHEN 'FCHG' THEN 'FUEL'
+            WHEN 'FUSU' THEN 'FUEL'
+            WHEN 'DST' THEN 'DST'
+            WHEN 'CVYI' THEN 'DST'
+            WHEN 'HJBT' THEN 'DST'
+            WHEN 'KNIG' THEN 'DST'
+            WHEN 'L2D' THEN 'DST'
+            WHEN 'SCNN' THEN 'DST'
+            WHEN 'UFLB' THEN 'DST'
+            WHEN 'USXI' THEN 'DST'
+            WHEN 'PGLI' THEN 'DST'
+            WHEN 'EXM' THEN 'EXM'
+            WHEN 'SCS' THEN 'SCS'
+            WHEN 'FTP' THEN 'FTP'
+            WHEN 'TSC' THEN 'TSC'
+            WHEN 'DIST' THEN 'DIST'
+            WHEN 'DLTL' THEN 'DLTL'
+            WHEN 'FLAT' THEN 'FLAT'
+            WHEN 'SPOT' THEN 'SPOT'
+            WHEN 'FA_A' THEN 'FA_A'
+            ELSE 'Accessorials'
+        END AS cost_grouping,
+        COALESCE(CAST(`accrual cost` AS DECIMAL(30,8)), 0.000) AS accrual_cost,
+        `service tms code` AS service_tms_code,
+        `freight type` AS freight_type,
+        `country to` AS country_to,
+        CAST(`distance per load` AS DECIMAL(30,8)) AS distance_per_load,
+        CAST(`weighted average rate` AS DECIMAL(30,8)) AS weighted_average_rate_old,
+        `origin location id` AS shipping_point_code
+    FROM tfs
+),
+
+tfs_enriched AS (
+    SELECT
+        d.destination_postal_update,
+        d.destination_zone_update,
+        b.*,
+        CASE
+            WHEN TO_DATE(b.actual_gi_date) >= '2016-11-01' THEN b.destination_zone
+            WHEN b.destination_zone IS NULL AND d.destination_zone_update IS NOT NULL THEN d.destination_zone_update
+            WHEN b.destination_zone IS NULL AND d.destination_zone_update IS NULL THEN b.destination_postal
+            ELSE b.destination_zone
+        END AS destination_zone_new
+    FROM null_dest_lookup d
+    RIGHT JOIN tfs_base b ON d.destination_postal_update = b.destination_postal
+    WHERE b.load_id = 'No Load ID'
+),
+
+tfs_with_null_origins AS (
+    SELECT
+        o.origin_zone_null,
+        e.*,
+        COALESCE(e.origin_zone, o.origin_zone_null) AS origin_zone_new
+    FROM null_origin_lookup o
+    RIGHT JOIN tfs_enriched e ON o.shipping_point_code = e.shipping_point_code
+),
+
+tfs_hist_weight_avg_rate_lkp_deduped AS (
+    SELECT DISTINCT
+        origin_zone_name AS origin_zone,
+        dest_zone_val AS destination_zone,
+        weight_avg_rate AS weighted_average_rate_hist
+    FROM tfs_hist_weight_avg_rate_lkp
+),
+
+final_with_hist AS (
+    SELECT
+        t.load_id,
+        t.voucher_id,
+        t.subsector,
+        t.cost_ratio,
+        t.accrual_cost,
+        t.service_tms_code,
+        t.freight_type,
+        t.country_to,
+        t.distance_per_load,
+        h.weighted_average_rate_hist
+    FROM tfs_with_null_origins t
+    LEFT JOIN tfs_hist_weight_avg_rate_lkp_deduped h
+        ON t.origin_zone = h.origin_zone AND t.destination_zone_new = h.destination_zone
+),
+
+ds_subsectorcosts_max AS (
+    SELECT
+        voucher_id,
+        MAX(weighted_average_rate_hist) AS max_weighted_average_rate_hist
+    FROM final_with_hist
+    GROUP BY voucher_id
+)
+
+SELECT
+    *
+FROM (
+    SELECT
+        *
+    FROM final_with_hist
+) null_final
+LEFT JOIN ds_subsectorcosts_max tfs_max
+    ON null_final.voucher_id = tfs_max.voucher_id;
