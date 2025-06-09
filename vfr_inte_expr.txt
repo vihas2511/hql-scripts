@@ -1,51 +1,82 @@
-# [Previous content remains unchanged above]
-
-# --- VFR Final Join and Impact Metrics Calculation ---
-otd_vfr_join3_df = otd_vfr_join2_df.join(otd_vfr_join2_calc_df, "load_id", how='left') \
+otd_vfr_join3_df = (
+    otd_vfr_join2_df.join(otd_vfr_join2_calc_df, "load_id", how="left")
     .join(
         f.broadcast(origin_sf_dict_df),
         otd_vfr_join2_df.origin_zone_ship_from_code == origin_sf_dict_df.origin_sf_dict,
-        how='left'
-    ) \
-    .withColumn("cases_impact_amt", f.expr("(avg_net_vol_fill_rate * total_load_cost_amt)")) \
-    .withColumn("for_max_net_vol_cal", f.expr("(avg_max_weight_net_order/net_density_order_qty)")) \
-    .withColumn("max_net_vol_qty", f.expr("""
+        how="left",
+    )
+    .withColumn(
+        "cases_impact_amt", f.expr("(avg_net_vol_fill_rate * total_load_cost_amt)")
+    )
+    .withColumn(
+        "for_max_net_vol_cal",
+        f.expr("(avg_max_weight_net_order/net_density_order_qty)"),
+    )
+    .withColumn(
+        "max_net_vol_qty",
+        f.expr(
+            """
         CASE
             WHEN (avg_max_weight_net_order / net_density_order_qty) < 3128 THEN 3128
             ELSE (avg_max_weight_net_order / net_density_order_qty)
         END
-    """)) \
-    .withColumn("combined_load_max_weight_qty", f.expr("""
+    """
+        ),
+    )
+    .withColumn(
+        "combined_load_max_weight_qty",
+        f.expr(
+            """
         CASE
             WHEN vehicle_true_max_weight_qty IS NOT NULL THEN vehicle_true_max_weight_qty
             WHEN ship_cond_val = 14 THEN 43500
             WHEN ship_cond_val = 10 THEN 45500
             ELSE max_weight_qty
         END
-    """).cast("double")) \
-    .withColumn("calc_std_weight_qty", f.expr("""
+    """
+        ).cast("double"),
+    )
+    .withColumn(
+        "calc_std_weight_qty",
+        f.expr(
+            """
         CASE
             WHEN combined_load_max_weight_qty IS NOT NULL THEN (combined_load_max_weight_qty-1000)
             ELSE 44500
         END
-    """)) \
-    .withColumn("combined_load_max_vol_qty_old", f.expr("""
+    """
+        ),
+    )
+    .withColumn(
+        "combined_load_max_vol_qty_old",
+        f.expr(
+            """
         CASE
             WHEN vehicle_true_max_vol_qty IS NOT NULL THEN vehicle_true_max_vol_qty / 1728
             WHEN ship_cond_val = 14 THEN 3949.98
             WHEN ship_cond_val = 10 THEN 3949.98
             ELSE max_vol_trans_mgmt_sys_qty
         END
-    """).cast("double")) \
-    .withColumn("combined_load_max_vol_qty", f.expr("""
+    """
+        ).cast("double"),
+    )
+    .withColumn(
+        "combined_load_max_vol_qty",
+        f.expr(
+            """
         CASE
             WHEN vehicle_true_max_vol_qty IS NOT NULL THEN vehicle_true_max_vol_qty / 1728
             WHEN ship_cond_val = 14 THEN 3949.98
             WHEN ship_cond_val = 10 THEN 3949.98
             ELSE max_vol_trans_mgmt_sys_qty
         END
-    """).cast("double")) \
-    .withColumn("hopade_amt", f.expr("""
+    """
+        ).cast("double"),
+    )
+    .withColumn(
+        "hopade_amt",
+        f.expr(
+            """
 	CASE
         WHEN coalesce(sum_pallet_spot_qty, floor_position_qty)                >= COALESCE(max_pallet_tms_trans_type_qty, 29.9999)
             AND plan_gross_weight_qty           <  calc_std_weight_qty
@@ -73,9 +104,14 @@ otd_vfr_join3_df = otd_vfr_join2_df.join(otd_vfr_join2_calc_df, "load_id", how='
             AND low_density_site_val            =  "TRUE" 
                 THEN (((combined_load_max_vol_qty - plan_gross_vol_qty) / combined_load_max_vol_qty) * total_load_cost_amt * load_material_vol_qty)
         ELSE 0
-    END""")) \
-    .withColumn("hopade_amt_dec", f.col("hopade_amt").cast("decimal(38,6)")) \
-    .withColumn("max_orders_incrmtl_amt", f.expr("""
+    END"""
+        ),
+    )
+    .withColumn("hopade_amt_dec", f.col("hopade_amt").cast("decimal(38,6)"))
+    .withColumn(
+        "max_orders_incrmtl_amt",
+        f.expr(
+            """
 	CASE
         WHEN plan_gross_weight_qty = 0
             AND plan_gross_vol_qty = 0
@@ -91,8 +127,13 @@ otd_vfr_join3_df = otd_vfr_join2_df.join(otd_vfr_join2_calc_df, "load_id", how='
             AND plan_gross_weight_qty               >  0
                 THEN ((1000)/(combined_load_max_weight_qty)) * total_load_cost_amt * load_material_weight_qty
         ELSE 0
-    END""")) \
-    .withColumn("glb_segment_impact_cat_ld_amt", f.expr("""CASE
+    END"""
+        ),
+    )
+    .withColumn(
+        "glb_segment_impact_cat_ld_amt",
+        f.expr(
+            """CASE
         WHEN low_density_site_val      = "FALSE"
             AND (substring(origin_zone_ship_from_code, 1, 6) = 'SF_CM_'
                 OR length(origin_sf_dict) > 1
@@ -111,8 +152,13 @@ otd_vfr_join3_df = otd_vfr_join2_df.join(otd_vfr_join2_calc_df, "load_id", how='
         WHEN low_density_site_val      = "TRUE"
                 THEN ((((combined_load_max_vol_qty - plan_gross_vol_qty)/(combined_load_max_vol_qty)) * total_load_cost_amt) * load_material_vol_qty ) - max_orders_incrmtl_amt - hopade_amt_dec
         ELSE 0
-    END""")) \
-    .withColumn("drf_last_truck_amt", f.expr("""CASE
+    END"""
+        ),
+    )
+    .withColumn(
+        "drf_last_truck_amt",
+        f.expr(
+            """CASE
         WHEN floor_position_qty            <  COALESCE(max_pallet_tms_trans_type_qty, 29.9999)
             AND plan_gross_weight_qty      <  calc_std_weight_qty
             AND low_density_site_val       = "FALSE" 
@@ -139,9 +185,16 @@ otd_vfr_join3_df = otd_vfr_join2_df.join(otd_vfr_join2_calc_df, "load_id", how='
             AND low_density_site_val       = "TRUE" 
                 THEN (((((combined_load_max_vol_qty - plan_gross_vol_qty)) / (combined_load_max_vol_qty)) * total_load_cost_amt) * load_material_vol_qty) - max_orders_incrmtl_amt - glb_segment_impact_cat_ld_amt
         ELSE 0
-    END""")) \
-    .withColumn("drf_last_truck_amt_dec", f.col("drf_last_truck_amt").cast("decimal(38,6)")) \
-    .withColumn("cut_impact_rate", f.expr("""
+    END"""
+        ),
+    )
+    .withColumn(
+        "drf_last_truck_amt_dec", f.col("drf_last_truck_amt").cast("decimal(38,6)")
+    )
+    .withColumn(
+        "cut_impact_rate",
+        f.expr(
+            """
 	CASE
         WHEN plan_gross_weight_qty = 0   -- todo: change plan_gross_weight_qty
             AND plan_gross_vol_qty = 0   -- todo: change plan_gross_vol_qty
@@ -163,8 +216,13 @@ otd_vfr_join3_df = otd_vfr_join2_df.join(otd_vfr_join2_calc_df, "load_id", how='
         WHEN low_density_site_val    = "FALSE" 
             THEN ((plan_gross_weight_qty - shipped_gross_weight_qty) / combined_load_max_weight_qty) * total_load_cost_amt * load_material_weight_qty
         ELSE 0
-    END""")) \
-    .withColumn("max_orders_non_drp_amt", f.expr("""CASE
+    END"""
+        ),
+    )
+    .withColumn(
+        "max_orders_non_drp_amt",
+        f.expr(
+            """CASE
         WHEN substring(origin_zone_ship_from_code, 1, 6) = 'SF_CM_' 
             THEN 0
         WHEN length(origin_sf_dict) > 1 
@@ -174,33 +232,92 @@ otd_vfr_join3_df = otd_vfr_join2_df.join(otd_vfr_join2_calc_df, "load_id", how='
             AND shipped_gross_weight_qty = 0
             AND shipped_gross_vol_qty = 0
                 THEN 0
-        WHEN plan_gross_weight_qty                    <= 0
-            AND net_vol_qty                           >  0
-            AND shipped_gross_weight_qty              <  combined_load_max_weight_qty
-            AND low_density_site_val                  = "FALSE"
-                THEN (((combined_load_max_weight_qty - shipped_gross_weight_qty)/(combined_load_max_weight_qty))*total_load_cost_amt) * load_material_weight_qty
-        WHEN plan_gross_vol_qty                       <= 0
-            AND net_vol_qty                           >  0
-            AND shipped_gross_vol_qty                 <  combined_load_max_vol_qty
-            AND low_density_site_val                  =  "TRUE"
-                THEN (((combined_load_max_vol_qty - shipped_gross_vol_qty)/(combined_load_max_vol_qty))*total_load_cost_amt) * load_material_vol_qty
+        WHEN plan_gross_weight_qty <= 0
+            AND net_vol_qty > 0
+            AND shipped_gross_weight_qty < combined_load_max_weight_qty
+            AND low_density_site_val = 'FALSE'
+                THEN (((combined_load_max_weight_qty - shipped_gross_weight_qty) / combined_load_max_weight_qty) * total_load_cost_amt) * load_material_weight_qty
+        WHEN plan_gross_vol_qty <= 0
+            AND net_vol_qty > 0
+            AND shipped_gross_vol_qty < combined_load_max_vol_qty
+            AND low_density_site_val = 'TRUE'
+                THEN (((combined_load_max_vol_qty - shipped_gross_vol_qty) / combined_load_max_vol_qty) * total_load_cost_amt) * load_material_vol_qty
         ELSE 0
-    END'''
-	
-    .withColumn("max_orders_non_drp_amt_dec", f.col("max_orders_non_drp_amt").cast("decimal(38,6)")) \
-    .withColumn("prod_density_gap_impact_amt", f.expr("""
-	CASE
-        WHEN density_rate < 13.1 THEN 0
-        ELSE (1-(max_net_vol_qty/3948)-opertng_space_pct-pallet_impact_pct)*total_load_cost_amt
-    END""")) \
-    .withColumn("prod_density_gap_impact_pct", f.expr("""
-	CASE
-        WHEN density_rate < 13.1 THEN 0
-        ELSE (1-(max_net_vol_qty/3950)-opertng_space_pct-pallet_impact_pct)
-    END""")) \
-    .withColumn("drf_last_truck_amt_dec", f.expr('CASE WHEN drf_last_truck_amt_dec < 0 THEN 0 ELSE drf_last_truck_amt_dec END')) \
-    .withColumn("glb_segment_impact_cat_ld_amt", f.expr('CASE WHEN glb_segment_impact_cat_ld_amt < 0 THEN 0 ELSE glb_segment_impact_cat_ld_amt END')) \
-    .withColumn("max_orders_incrmtl_amt", f.expr('CASE WHEN max_orders_incrmtl_amt < 0 THEN 0 ELSE max_orders_incrmtl_amt END')) \
-    .withColumn("max_orders_non_drp_amt_dec", f.expr('CASE WHEN max_orders_non_drp_amt_dec < 0 THEN 0 ELSE max_orders_non_drp_amt_dec END')) \
-    .withColumn("hopade_amt_dec", f.expr('CASE WHEN hopade_amt_dec < 0 THEN 0 ELSE hopade_amt_dec END')) \
-    .withColumn("cut_impact_rate", f.expr('CASE WHEN cut_impact_rate < 0 THEN 0 ELSE cut_impact_rate END'))
+    END"""
+        ),
+    )
+    .withColumn(
+        "max_orders_non_drp_amt_dec",
+        f.col("max_orders_non_drp_amt").cast("decimal(38,6)"),
+    )
+    .withColumn(
+        "prod_density_gap_impact_amt",
+        f.expr(
+            """
+        CASE
+            WHEN density_rate < 13.1 THEN 0
+            ELSE (1 - (max_net_vol_qty / 3948) - opertng_space_pct - pallet_impact_pct) * total_load_cost_amt
+        END
+    """
+        ),
+    )
+    .withColumn(
+        "prod_density_gap_impact_pct",
+        f.expr(
+            """
+        CASE
+            WHEN density_rate < 13.1 THEN 0
+            ELSE (1 - (max_net_vol_qty / 3950) - opertng_space_pct - pallet_impact_pct)
+        END
+    """
+        ),
+    )
+    .withColumn(
+        "drf_last_truck_amt_dec",
+        f.expr(
+            """
+        CASE WHEN drf_last_truck_amt_dec < 0 THEN 0 ELSE drf_last_truck_amt_dec END
+    """
+        ),
+    )
+    .withColumn(
+        "glb_segment_impact_cat_ld_amt",
+        f.expr(
+            """
+        CASE WHEN glb_segment_impact_cat_ld_amt < 0 THEN 0 ELSE glb_segment_impact_cat_ld_amt END
+    """
+        ),
+    )
+    .withColumn(
+        "max_orders_incrmtl_amt",
+        f.expr(
+            """
+        CASE WHEN max_orders_incrmtl_amt < 0 THEN 0 ELSE max_orders_incrmtl_amt END
+    """
+        ),
+    )
+    .withColumn(
+        "max_orders_non_drp_amt_dec",
+        f.expr(
+            """
+        CASE WHEN max_orders_non_drp_amt_dec < 0 THEN 0 ELSE max_orders_non_drp_amt_dec END
+    """
+        ),
+    )
+    .withColumn(
+        "hopade_amt_dec",
+        f.expr(
+            """
+        CASE WHEN hopade_amt_dec < 0 THEN 0 ELSE hopade_amt_dec END
+    """
+        ),
+    )
+    .withColumn(
+        "cut_impact_rate",
+        f.expr(
+            """
+        CASE WHEN cut_impact_rate < 0 THEN 0 ELSE cut_impact_rate END
+    """
+        ),
+    )
+)
